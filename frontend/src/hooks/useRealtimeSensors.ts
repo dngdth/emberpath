@@ -3,6 +3,9 @@ import api from '../utils/api';
 import { DashboardSummary, SensorDevice } from '../types/sensor';
 import { getToken } from '../utils/authHelpers';
 
+// Danh sach device_id that tu ESP32 (khop voi buoi1.ino)
+const REAL_DEVICE_IDS = new Set(['temp-01', 'mq2-01', 'mq2-02', 'mq2-03']);
+
 export function useRealtimeSensors(selectedFloor?: number | null, search?: string) {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [mq2, setMq2] = useState<SensorDevice[]>([]);
@@ -16,17 +19,23 @@ export function useRealtimeSensors(selectedFloor?: number | null, search?: strin
     return params.toString();
   }, [selectedFloor, search]);
 
+  // Fetch am tham - khong set loading (WebSocket background refresh)
+  async function refreshData() {
+    const [summaryRes, mq2Res, tempRes] = await Promise.all([
+      api.get<DashboardSummary>('/dashboard/summary'),
+      api.get<SensorDevice[]>(`/sensors/mq2${queryParams ? `?${queryParams}` : ''}`),
+      api.get<SensorDevice[]>(`/sensors/temperature${queryParams ? `?${queryParams}` : ''}`),
+    ]);
+    setSummary(summaryRes.data);
+    setMq2(mq2Res.data.filter((s) => REAL_DEVICE_IDS.has(s.device_id)));
+    setTemperature(tempRes.data.filter((s) => REAL_DEVICE_IDS.has(s.device_id)));
+  }
+
+  // Fetch co loading - dung lan dau hoac khi doi bo loc
   async function fetchAll() {
     setLoading(true);
     try {
-      const [summaryRes, mq2Res, tempRes] = await Promise.all([
-        api.get<DashboardSummary>('/dashboard/summary'),
-        api.get<SensorDevice[]>(`/sensors/mq2${queryParams ? `?${queryParams}` : ''}`),
-        api.get<SensorDevice[]>(`/sensors/temperature${queryParams ? `?${queryParams}` : ''}`),
-      ]);
-      setSummary(summaryRes.data);
-      setMq2(mq2Res.data);
-      setTemperature(tempRes.data);
+      await refreshData();
     } finally {
       setLoading(false);
     }
@@ -46,7 +55,7 @@ export function useRealtimeSensors(selectedFloor?: number | null, search?: strin
     socket.onmessage = (event) => {
       const payload = JSON.parse(event.data);
       if (payload.type === 'sensor_tick') {
-        void fetchAll();
+        void refreshData(); // am tham, khong set loading
       }
     };
 

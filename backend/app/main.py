@@ -17,7 +17,7 @@ from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.models.user import User
 from app.seed.seed_data import seed_database
-from app.services.simulator import simulator_loop
+# from app.services.simulator import simulator_loop  # Simulator da tat
 from app.services.websocket_manager import ws_manager
 
 
@@ -31,15 +31,11 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
-    simulator_task = asyncio.create_task(simulator_loop())
+    # Simulator da tat - chi hien thi du lieu that tu ESP32
     try:
         yield
     finally:
-        simulator_task.cancel()
-        try:
-            await simulator_task
-        except asyncio.CancelledError:
-            pass
+        pass
 
 
 app = FastAPI(title=settings.app_name, version="1.0.0", lifespan=lifespan)

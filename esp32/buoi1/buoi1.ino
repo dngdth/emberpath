@@ -38,8 +38,8 @@ DallasTemperature sensors(&oneWire);
 
 #define BUZZER_PIN 13
 
-const int mq2_1_A = 27; const int mq2_1_D = 33;
-const int mq2_2_A = 34; const int mq2_2_D = 32;
+const int mq2_1_A = 32; const int mq2_1_D = 33;
+const int mq2_2_A = 34; const int mq2_2_D = 26;
 const int mq2_3_A = 35; const int mq2_3_D = 16;
 
 unsigned long lastBuzzerToggle = 0;

@@ -116,25 +116,12 @@ def seed_database(db: Session) -> None:
             for obj in objects
         ])
 
+    # Chi giu lai sensor that dang chay tu ESP32
     device_specs = [
-        (building_a.id, floor1.id, "Lobby", "mq2-01", "MQ2 Lobby A", "mq2", 240, 180, "ppm"),
-        (building_a.id, floor1.id, "Lobby", "mq2-02", "MQ2 Corridor A", "mq2", 240, 205, "ppm"),
-        (building_a.id, floor1.id, "Control Room", "mq2-03", "MQ2 Control A", "mq2", 240, 265, "ppm"),
-        (building_a.id, floor1.id, "North Exit", "mq2-04", "MQ2 Exit A", "mq2", 240, 330, "ppm"),
-        (building_a.id, floor2.id, "Meeting Room", "mq2-05", "MQ2 Meeting A", "mq2", 240, 190, "ppm"),
-        (building_a.id, floor2.id, "Open Office", "mq2-06", "MQ2 Office A", "mq2", 240, 270, "ppm"),
-        (building_a.id, floor2.id, "Open Office", "mq2-07", "MQ2 South Wing A", "mq2", 240, 225, "ppm"),
-        (building_a.id, floor2.id, "Stairs", "mq2-08", "MQ2 Stairwell A", "mq2", 240, 310, "ppm"),
-        (building_a.id, floor1.id, "Lobby", "temp-01", "Temp Lobby A", "temp", 40, 29, "C"),
-        (building_a.id, floor1.id, "Control Room", "temp-02", "Temp Control A", "temp", 40, 34, "C"),
-        (building_a.id, floor1.id, "Lobby", "temp-03", "Temp Corridor A", "temp", 40, 37, "C"),
-        (building_a.id, floor1.id, "Exit", "temp-04", "Temp Exit A", "temp", 40, 42, "C"),
-        (building_a.id, floor2.id, "Meeting Room", "temp-05", "Temp Meeting A", "temp", 40, 31, "C"),
-        (building_a.id, floor2.id, "Open Office", "temp-06", "Temp Office A", "temp", 40, 38, "C"),
-        (building_a.id, floor2.id, "Pantry", "temp-07", "Temp Pantry A", "temp", 40, 44, "C"),
-        (building_a.id, floor2.id, "Server Corner", "temp-08", "Temp Server A", "temp", 40, 36, "C"),
-        (building_b.id, floorb1.id, "Security", "mq2-b1", "MQ2 Security B", "mq2", 240, 170, "ppm"),
-        (building_b.id, floorb1.id, "Security", "temp-b1", "Temp Security B", "temp", 40, 26, "C"),
+        (building_a.id, floor1.id, "Lobby", "mq2-01", "MQ2 Lobby A",    "mq2",  600, 0,  "raw"),
+        (building_a.id, floor1.id, "Lobby", "mq2-02", "MQ2 Corridor A", "mq2",  600, 0,  "raw"),
+        (building_a.id, floor1.id, "Lobby", "mq2-03", "MQ2 Control A",  "mq2",  600, 0,  "raw"),
+        (building_a.id, floor1.id, "Lobby", "temp-01", "Temp Lobby A",  "temp", 50,  28, "C"),
     ]
     now = datetime.utcnow()
     for building_id, floor_id, room_name, device_id, name, sensor_type, threshold, latest_value, unit in device_specs:

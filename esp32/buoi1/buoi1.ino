@@ -14,7 +14,7 @@
 #define SCREEN_ADDRESS 0x3C
 
 #define LED_PIN     12
-#define NUM_LEDS    30
+#define NUM_LEDS    60
 #define BRIGHTNESS  150
 
 // --- CẤU HÌNH WIFI & SERVER ---

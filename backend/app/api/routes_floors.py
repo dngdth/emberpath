@@ -10,6 +10,7 @@ from app.models.floor import Floor
 from app.models.plan import FloorPlan, PlanObject
 from app.models.user import User, UserRole
 from app.schemas.floor import FloorCreateRequest, FloorPlanResponse, FloorPlanSaveRequest, FloorRenameRequest, FloorResponse
+from app.services.pathfinding import find_safe_path
 
 router = APIRouter(prefix="/floors", tags=["floors"])
 
@@ -124,3 +125,22 @@ def save_floor_plan(
 
     db.commit()
     return FloorPlanResponse(floor_id=floor.id, floor_name=floor.name, objects=payload.objects, version=plan.version)
+
+
+@router.get("/{floor_id}/path", response_model=list[str])
+def get_safe_path(
+    floor_id: int,
+    start_node_id: str,
+    end_node_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    floor = db.scalar(select(Floor).where(Floor.id == floor_id, Floor.building_id == current_user.building_id))
+    if not floor:
+        raise HTTPException(status_code=404, detail="Floor not found")
+        
+    try:
+        path = find_safe_path(db, current_user.building_id, floor_id, start_node_id, end_node_id)
+        return path
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

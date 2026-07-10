@@ -21,6 +21,7 @@ interface Props {
   onSelectionBox: (ids: string[]) => void;
   onContextAction: (action: string, objectId: string) => void;
   onViewportChange?: (viewport: { width: number; height: number }) => void;
+  safePath?: string[];
 }
 
 const CANVAS_WIDTH = 4000;
@@ -57,6 +58,19 @@ export function CanvasEditor(props: Props) {
   );
 
   const resizeEnabled = selectedObjects.length === 1 && isResizable(selectedObjects[0].type);
+
+  const safePathPoints = useMemo(() => {
+    if (!props.safePath || props.safePath.length < 2) return null;
+    const points: number[] = [];
+    for (const id of props.safePath) {
+      const node = props.objects.find(o => o.id === id);
+      if (node) {
+        points.push(node.x + (node.width || getDefaultSize(node.type).width) / 2);
+        points.push(node.y + (node.height || getDefaultSize(node.type).height) / 2);
+      }
+    }
+    return points;
+  }, [props.safePath, props.objects]);
 
   useEffect(() => {
     const node = wrapperRef.current;
@@ -301,6 +315,29 @@ export function CanvasEditor(props: Props) {
       );
     }
 
+    if (object.type === 'connector') {
+      const fromNode = props.objects.find((o) => o.id === object.fromNodeId);
+      const toNode = props.objects.find((o) => o.id === object.toNodeId);
+      if (!fromNode || !toNode) return null;
+
+      const fromX = fromNode.x + (fromNode.width || getDefaultSize(fromNode.type).width) / 2;
+      const fromY = fromNode.y + (fromNode.height || getDefaultSize(fromNode.type).height) / 2;
+      const toX = toNode.x + (toNode.width || getDefaultSize(toNode.type).width) / 2;
+      const toY = toNode.y + (toNode.height || getDefaultSize(toNode.type).height) / 2;
+
+      return (
+        <Group {...commonProps} x={0} y={0}>
+          <Line
+            points={[fromX, fromY, toX, toY]}
+            stroke={selected ? '#3b82f6' : '#9ca3af'}
+            strokeWidth={selected ? 4 : 2}
+            dash={[5, 5]}
+            hitStrokeWidth={15}
+          />
+        </Group>
+      );
+    }
+
     return (
       <Group {...commonProps}>
         <Text
@@ -374,6 +411,20 @@ export function CanvasEditor(props: Props) {
 
             {props.objects.map(renderObject)}
 
+            {safePathPoints && (
+              <Line
+                points={safePathPoints}
+                stroke="#22c55e"
+                strokeWidth={6}
+                lineJoin="round"
+                lineCap="round"
+                shadowColor="#22c55e"
+                shadowBlur={10}
+                shadowOpacity={0.8}
+                listening={false}
+              />
+            )}
+
             {guides.map((guide, index) => (
               guide.orientation === 'vertical' ? (
                 <Line
@@ -424,6 +475,23 @@ export function CanvasEditor(props: Props) {
             className="rounded-lg bg-[#d8453b] px-2 py-1 text-white hover:bg-[#bb352d]"
           >
             Delete
+          </button>
+        </div>
+      )}
+
+      {selectedObjects.length === 2 && (
+        <div className="absolute left-1/2 top-4 z-20 flex -translate-x-1/2 gap-2 rounded-2xl border border-[#e0b8a6] bg-[#fff7f2]/95 p-2 text-sm shadow-xl">
+          <button
+            onClick={() => props.onContextAction('connect_nodes', '')}
+            className="rounded-lg bg-[#3b82f6] px-3 py-1.5 font-medium text-white hover:bg-[#2563eb]"
+          >
+            Connect Nodes
+          </button>
+          <button
+            onClick={() => props.onContextAction('find_path', '')}
+            className="rounded-lg bg-[#22c55e] px-3 py-1.5 font-medium text-white hover:bg-[#16a34a]"
+          >
+            Find Safe Path
           </button>
         </div>
       )}

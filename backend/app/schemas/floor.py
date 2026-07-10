@@ -16,7 +16,8 @@ class PlanObjectIn(BaseModel):
     nodeStatus: str | None = None
     locked: bool = False
     visible: bool = True
-
+    fromNodeId: str | None = None
+    toNodeId: str | None = None
 
 class FloorResponse(BaseModel):
     id: int

@@ -1,4 +1,4 @@
-export type ObjectType = 'room' | 'door' | 'exit' | 'stairs' | 'mq2' | 'temp' | 'led' | 'label';
+export type ObjectType = 'room' | 'door' | 'exit' | 'stairs' | 'mq2' | 'temp' | 'led' | 'label' | 'connector';
 
 export interface FloorPlanObject {
   id: string;
@@ -15,6 +15,8 @@ export interface FloorPlanObject {
   nodeStatus?: 'safe' | 'danger';
   locked?: boolean;
   visible?: boolean;
+  fromNodeId?: string;
+  toNodeId?: string;
 }
 
 export interface FloorItem {

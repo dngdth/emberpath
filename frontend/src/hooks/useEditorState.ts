@@ -54,11 +54,25 @@ export function useEditorState(objects: FloorPlanObject[], setObjects: (next: Fl
     setObjects([target, ...objects.filter((item) => item.id !== id)]);
   }
 
+  function createConnector(fromNodeId: string, toNodeId: string) {
+    const connector: FloorPlanObject = {
+      id: `connector-${crypto.randomUUID()}`,
+      type: 'connector',
+      x: 0,
+      y: 0,
+      fromNodeId,
+      toNodeId,
+      locked: true,
+    };
+    setObjects([...objects, connector]);
+  }
+
   return {
     activeTool,
     setActiveTool,
     snapEnabled,
     setSnapEnabled,
+    createConnector,
     addObject,
     updateObject,
     removeObjects,

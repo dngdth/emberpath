@@ -19,6 +19,7 @@ export function FloorEditorPage() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState('');
   const [editorViewport, setEditorViewport] = useState({ width: 1200, height: 780 });
+  const [safePath, setSafePath] = useState<string[]>([]);
 
   const history = useHistory<FloorPlanObject[]>([]);
   const zoomPan = useZoomPan();
@@ -127,6 +128,17 @@ export function FloorEditorPage() {
   }
 
   function handleContextAction(action: string, objectId: string) {
+    if (action === 'connect_nodes' && selection.selectedIds.length === 2) {
+      editor.createConnector(selection.selectedIds[0], selection.selectedIds[1]);
+      selection.clearSelection();
+      return;
+    }
+
+    if (action === 'find_path' && selection.selectedIds.length === 2) {
+      void findSafePath(selection.selectedIds[0], selection.selectedIds[1]);
+      return;
+    }
+
     const object = history.state.find((item) => item.id === objectId);
     if (!object) return;
 
@@ -148,6 +160,17 @@ export function FloorEditorPage() {
     if (action === 'front') editor.bringToFront(objectId);
     if (action === 'back') editor.sendToBack(objectId);
     if (action === 'lock') editor.updateObject(objectId, { locked: !object.locked });
+  }
+
+  async function findSafePath(startId: string, endId: string) {
+    if (!activeFloorId) return;
+    try {
+      const { data } = await api.get<string[]>(`/floors/${activeFloorId}/path?start_node_id=${startId}&end_node_id=${endId}`);
+      setSafePath(data);
+      selection.clearSelection();
+    } catch (error: any) {
+      alert(error.response?.data?.detail || 'Không thể tìm thấy đường đi an toàn.');
+    }
   }
 
   function handleExport() {
@@ -269,6 +292,14 @@ export function FloorEditorPage() {
                 >
                   {saving ? 'Đang lưu...' : 'Save JSON'}
                 </button>
+                {safePath.length > 0 && (
+                  <button
+                    onClick={() => setSafePath([])}
+                    className="rounded-xl bg-[#22c55e] px-3 py-2 font-medium text-white hover:bg-[#16a34a]"
+                  >
+                    Xóa đường đi
+                  </button>
+                )}
                 <button
                   onClick={handleExport}
                   className="rounded-xl border border-[#d8b1a1] bg-[#fff8f3] px-3 py-2 text-[#8b241e] hover:bg-[#f7e8df]"
@@ -285,6 +316,7 @@ export function FloorEditorPage() {
             </div>
 
             <CanvasEditor
+              safePath={safePath}
               objects={history.state}
               selectedIds={selection.selectedIds}
               activeTool={editor.activeTool}

@@ -1,5 +1,6 @@
 import { LayoutDashboard, Map, History, Flame, ChevronLeft } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useAuthStore } from '../../store/authStore';
 
 interface Props {
   activeTab: 'dashboard' | 'editor' | 'history';
@@ -12,6 +13,7 @@ interface Props {
 export function DashboardSidebar({ activeTab, onChangeTab, isDark, isOpen, onClose }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuthStore();
 
   const menuItems = [
     {
@@ -26,16 +28,20 @@ export function DashboardSidebar({ activeTab, onChangeTab, isDark, isOpen, onClo
         onClose();
       },
     },
-    {
-      id: 'editor' as const,
-      label: 'Quản lý Sơ đồ',
-      icon: Map,
-      onClick: () => {
-        if (onChangeTab) onChangeTab('editor');
-        navigate('/editor');
-        onClose();
-      },
-    },
+    ...(user?.role === 'admin_building'
+      ? [
+          {
+            id: 'editor' as const,
+            label: 'Quản lý Sơ đồ',
+            icon: Map,
+            onClick: () => {
+              if (onChangeTab) onChangeTab('editor');
+              navigate('/editor');
+              onClose();
+            },
+          },
+        ]
+      : []),
     {
       id: 'history' as const,
       label: 'Bảng Dữ liệu Lịch sử',

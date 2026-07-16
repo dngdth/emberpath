@@ -6,9 +6,11 @@ import { DashboardPage } from '../pages/DashboardPage';
 import { FloorEditorPage } from '../pages/FloorEditorPage';
 import { LandingPage } from '../pages/LandingPage';
 
-function ProtectedRoute({ children }: { children: JSX.Element }) {
-  const { token } = useAuthStore();
-  return token ? children : <Navigate to="/login" replace />;
+function ProtectedRoute({ children, adminOnly }: { children: JSX.Element; adminOnly?: boolean }) {
+  const { token, user } = useAuthStore();
+  if (!token) return <Navigate to="/login" replace />;
+  if (adminOnly && user?.role !== 'admin_building') return <Navigate to="/dashboard" replace />;
+  return children;
 }
 
 export function AppRouter() {
@@ -18,7 +20,7 @@ export function AppRouter() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-      <Route path="/editor" element={<ProtectedRoute><FloorEditorPage /></ProtectedRoute>} />
+      <Route path="/editor" element={<ProtectedRoute adminOnly><FloorEditorPage /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

@@ -2,28 +2,28 @@ import { FloorPlanObject, ObjectType } from '../types/editor';
 import { getDefaultSize } from '../utils/geometryHelpers';
 
 export const tokenLibrary: Array<{ type: ObjectType; label: string; description: string }> = [
-  { type: 'room', label: 'Room', description: 'Resizable room block' },
-  { type: 'door', label: 'Door', description: 'Door token' },
-  { type: 'exit', label: 'Exit', description: 'Emergency exit label' },
-  { type: 'stairs', label: 'Stairs', description: 'Stairway token' },
-  { type: 'mq2', label: 'MQ2 sensor', description: 'Gas/smoke sensor' },
-  { type: 'temp', label: 'Temp sensor', description: 'Temperature sensor' },
-  { type: 'led', label: 'LED node', description: 'LED safe/danger node' },
-  { type: 'label', label: 'Text label', description: 'Free text label' },
+  { type: 'room', label: 'Phòng / Khu vực', description: 'Khu vực phòng có thể co giãn kích thước' },
+  { type: 'door', label: 'Cửa ra vào', description: 'Cửa thông giữa các phòng hoặc khu vực' },
+  { type: 'exit', label: 'Lối thoát hiểm', description: 'Điểm thoát khẩn cấp an toàn' },
+  { type: 'stairs', label: 'Cầu thang', description: 'Cầu thang bộ hoặc thang thoát hiểm' },
+  { type: 'mq2', label: 'Cảm biến Khói (MQ2)', description: 'Phát hiện rò rỉ khí gas hoặc khói' },
+  { type: 'temp', label: 'Cảm biến Nhiệt độ', description: 'Đo nhiệt độ môi trường trực tiếp' },
+  { type: 'led', label: 'Đèn LED định hướng', description: 'Đèn LED chỉ đường thoát hiểm an toàn' },
+  { type: 'label', label: 'Nhãn chữ tự do', description: 'Văn bản chú thích trên sơ đồ' },
 ];
 
 export function createNewObject(type: ObjectType, x = 120, y = 120): FloorPlanObject {
   const size = getDefaultSize(type);
   const baseName = {
-    room: 'New Room',
-    door: 'Door',
-    exit: 'EXIT',
-    stairs: 'Stairs',
-    mq2: 'MQ2',
-    temp: 'Temp',
-    led: 'LED',
-    label: 'Label',
-    connector: 'Connector',
+    room: 'Phòng mới',
+    door: 'Cửa',
+    exit: 'LỐI THOÁT',
+    stairs: 'Cầu thang',
+    mq2: 'CB Khói',
+    temp: 'CB Nhiệt',
+    led: 'Đèn LED',
+    label: 'Nhãn chữ',
+    connector: 'Đường nối',
   }[type];
 
   return {

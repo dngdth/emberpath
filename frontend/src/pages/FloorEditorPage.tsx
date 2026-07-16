@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../utils/api';
 import { useAuthStore } from '../store/authStore';
-import { CanvasEditor } from '../components/CanvasEditor';
-import { EditorSidebar } from '../components/Sidebar';
-import { EditorToolbar } from '../components/Toolbar';
+import { useThemeStore } from '../store/themeStore';
+import { CanvasEditor } from '../components/MapEditor/CanvasEditor';
+import { EditorSidebar } from '../components/MapEditor/EditorSidebar';
+import { EditorToolbar } from '../components/MapEditor/EditorToolbar';
 import { useEditorState } from '../hooks/useEditorState';
 import { useHistory } from '../hooks/useHistory';
 import { useSelection } from '../hooks/useSelection';
@@ -13,6 +14,8 @@ import { FloorItem, FloorPlanObject, FloorPlanResponse, ObjectType } from '../ty
 
 export function FloorEditorPage() {
   const { user, logout } = useAuthStore();
+  const { darkMode } = useThemeStore();
+  const isDark = darkMode;
   const [floors, setFloors] = useState<FloorItem[]>([]);
   const [activeFloorId, setActiveFloorId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -211,16 +214,26 @@ export function FloorEditorPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f2e4dc] p-4 md:p-6">
+    <div
+      className={`min-h-screen transition-colors duration-300 p-4 md:p-6 ${
+        isDark ? 'bg-[#0F172A] text-slate-100' : 'bg-slate-50 text-slate-800'
+      }`}
+    >
       <div className="mx-auto max-w-[1820px] space-y-4">
-        <header className="rounded-[28px] border border-[#e2c7bb] bg-[#ead9cf] px-6 py-5 shadow-[0_8px_24px_rgba(122,43,29,0.08)]">
+        <header
+          className={`rounded-[28px] border px-6 py-5 shadow-soft transition-all duration-300 ${
+            isDark ? 'border-slate-800 bg-[#1E293B]' : 'border-slate-200 bg-white'
+          }`}
+        >
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[#b33a2f]">Map Editor</p>
-              <h1 className="mt-2 text-3xl font-bold text-[#a5261f]">
+              <p className={`text-sm font-semibold uppercase tracking-[0.22em] ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
+                Map Editor
+              </p>
+              <h1 className={`mt-2 text-3xl font-extrabold tracking-tight ${isDark ? 'text-slate-100' : 'text-slate-800'}`}>
                 Thiết kế sơ đồ tòa nhà — {user?.building.name}
               </h1>
-              <p className="mt-1 text-[#8a5a4b]">
+              <p className={`mt-1 text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                 Tông màu đồng bộ, zoom theo viewport, giữ Space hoặc dùng Pan để kéo canvas.
               </p>
             </div>
@@ -228,13 +241,19 @@ export function FloorEditorPage() {
             <div className="flex items-center gap-3">
               <a
                 href="/dashboard"
-                className="rounded-2xl bg-[#c94132] px-4 py-3 font-semibold text-white hover:bg-[#b23326]"
+                className={`rounded-2xl px-4 py-3 font-semibold text-white transition ${
+                  isDark ? 'bg-blue-600 hover:bg-blue-700' : 'bg-slate-900 hover:bg-slate-800'
+                }`}
               >
                 Về dashboard
               </a>
               <button
                 onClick={logout}
-                className="rounded-2xl border border-[#d0a999] bg-[#fff8f3] px-4 py-3 font-medium text-[#8b241e] hover:bg-[#f7e8df]"
+                className={`rounded-2xl border px-4 py-3 font-semibold transition ${
+                  isDark
+                    ? 'border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
               >
                 Logout
               </button>
@@ -243,21 +262,21 @@ export function FloorEditorPage() {
         </header>
 
         <EditorToolbar
-  activeTool={editor.activeTool}
-  onSelect={() => editor.setActiveTool('select')}
-  onPan={() => editor.setActiveTool('pan')}
-  onZoomIn={() => zoomPan.zoomIn(editorViewport)}
-  onZoomOut={() => zoomPan.zoomOut(editorViewport)}
-  onFit={() => zoomPan.fitView(editorViewport)}
-  onReset={() => zoomPan.resetView(editorViewport)}
-  onUndo={history.undo}
-  onRedo={history.redo}
-  onSave={savePlan}
-  onExport={handleExport}
-  onLoad={() => void handleImport()}
-  canUndo={history.canUndo}
-  canRedo={history.canRedo}
-/>
+          activeTool={editor.activeTool}
+          onSelect={() => editor.setActiveTool('select')}
+          onPan={() => editor.setActiveTool('pan')}
+          onZoomIn={() => zoomPan.zoomIn(editorViewport)}
+          onZoomOut={() => zoomPan.zoomOut(editorViewport)}
+          onFit={() => zoomPan.fitView(editorViewport)}
+          onReset={() => zoomPan.resetView(editorViewport)}
+          onUndo={history.undo}
+          onRedo={history.redo}
+          onSave={savePlan}
+          onExport={handleExport}
+          onLoad={() => void handleImport()}
+          canUndo={history.canUndo}
+          canRedo={history.canRedo}
+        />
 
         <div className="grid gap-4 xl:grid-cols-[250px_1fr]">
           <EditorSidebar
@@ -274,7 +293,11 @@ export function FloorEditorPage() {
           />
 
           <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-[24px] border border-[#e2c6bb] bg-[#fff8f3] px-4 py-3 text-sm text-[#8a5a4b] shadow-[0_8px_24px_rgba(122,43,29,0.06)]">
+            <div
+              className={`flex flex-wrap items-center justify-between gap-3 rounded-[24px] border px-4 py-3 text-sm shadow-soft transition-colors duration-300 ${
+                isDark ? 'border-slate-800 bg-[#1E293B] text-slate-300' : 'border-slate-200 bg-white text-slate-600'
+              }`}
+            >
               <div className="font-medium">
                 {loading ? 'Đang tải sơ đồ...' : `Floor đang chỉnh: ${floors.find((item) => item.id === activeFloorId)?.name ?? 'N/A'}`}
               </div>
@@ -282,33 +305,47 @@ export function FloorEditorPage() {
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={() => zoomPan.centerView(editorViewport)}
-                  className="rounded-xl border border-[#d8b1a1] bg-[#fff4ee] px-3 py-2 font-medium text-[#962b24] hover:bg-[#f9e6dc]"
+                  className={`rounded-xl border px-3 py-2 font-semibold transition ${
+                    isDark
+                      ? 'border-slate-700 bg-slate-900 text-slate-350 hover:bg-slate-800'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
                 >
                   Căn giữa
                 </button>
                 <button
                   onClick={() => void savePlan()}
-                  className="rounded-xl bg-[#c94132] px-3 py-2 font-medium text-white hover:bg-[#b23326]"
+                  className={`rounded-xl px-3 py-2 font-semibold text-white transition ${
+                    isDark ? 'bg-blue-600 hover:bg-blue-750' : 'bg-[#3B82F6] hover:bg-blue-600'
+                  }`}
                 >
                   {saving ? 'Đang lưu...' : 'Save JSON'}
                 </button>
                 {safePath.length > 0 && (
                   <button
                     onClick={() => setSafePath([])}
-                    className="rounded-xl bg-[#22c55e] px-3 py-2 font-medium text-white hover:bg-[#16a34a]"
+                    className="rounded-xl bg-emerald-600 px-3 py-2 font-semibold text-white hover:bg-emerald-700 transition"
                   >
                     Xóa đường đi
                   </button>
                 )}
                 <button
                   onClick={handleExport}
-                  className="rounded-xl border border-[#d8b1a1] bg-[#fff8f3] px-3 py-2 text-[#8b241e] hover:bg-[#f7e8df]"
+                  className={`rounded-xl border px-3 py-2 font-semibold transition ${
+                    isDark
+                      ? 'border-slate-700 bg-slate-900 text-slate-350 hover:bg-slate-800'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
                 >
                   Export JSON
                 </button>
                 <button
                   onClick={() => void handleImport()}
-                  className="rounded-xl border border-[#d8b1a1] bg-[#fff8f3] px-3 py-2 text-[#8b241e] hover:bg-[#f7e8df]"
+                  className={`rounded-xl border px-3 py-2 font-semibold transition ${
+                    isDark
+                      ? 'border-slate-700 bg-slate-900 text-slate-350 hover:bg-slate-800'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
                 >
                   Load JSON
                 </button>
@@ -340,7 +377,7 @@ export function FloorEditorPage() {
         </div>
 
         {toast && (
-          <div className="fixed bottom-4 right-4 rounded-2xl bg-[#c94132] px-4 py-3 font-medium text-white shadow-2xl">
+          <div className="fixed bottom-4 right-4 rounded-2xl bg-blue-600 px-4 py-3 font-semibold text-white shadow-2xl">
             {toast}
           </div>
         )}

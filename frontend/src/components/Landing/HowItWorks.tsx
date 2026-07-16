@@ -13,7 +13,9 @@ export function HowItWorks({ isDark }: HowItWorksProps) {
       title: 'Cảm biến khói kích hoạt',
       subtitle: 'Báo động cảm biến IoT',
       description: 'Cảm biến IoT (MQ2/Nhiệt độ) đặt tại các vị trí trong tòa nhà phát hiện nồng độ khói hoặc nhiệt độ tăng cao vượt ngưỡng an toàn.',
-      color: 'text-red-500 bg-red-500/10 border-red-500/20',
+      textColor: 'text-red-500',
+      borderColor: 'border-red-500/20',
+      bgTint: 'bg-red-500/10',
       glow: 'shadow-red-500/10',
     },
     {
@@ -22,7 +24,9 @@ export function HowItWorks({ isDark }: HowItWorksProps) {
       title: 'Cảnh báo WebSocket',
       subtitle: 'Truyền dẫn thời gian thực',
       description: 'Ngay lập tức, tín hiệu khẩn cấp được đẩy lên Cloud Server và phát sóng thời gian thực qua giao thức WebSocket đến các máy khách admin.',
-      color: 'text-orange-500 bg-orange-500/10 border-orange-500/20',
+      textColor: 'text-orange-500',
+      borderColor: 'border-orange-500/20',
+      bgTint: 'bg-orange-500/10',
       glow: 'shadow-orange-500/10',
     },
     {
@@ -31,7 +35,9 @@ export function HowItWorks({ isDark }: HowItWorksProps) {
       title: 'Tự động vẽ đường sơ tán',
       subtitle: 'Thuật toán Dijkstra chỉ lối',
       description: 'Thuật toán Dijkstra chạy trực tiếp trên bản đồ tòa nhà, cô lập khu vực cháy và tự động vẽ mũi tên chỉ dẫn lối thoát an toàn nhất.',
-      color: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20',
+      textColor: 'text-emerald-500',
+      borderColor: 'border-emerald-500/20',
+      bgTint: 'bg-emerald-500/10',
       glow: 'shadow-emerald-500/10',
     },
   ];
@@ -65,8 +71,10 @@ export function HowItWorks({ isDark }: HowItWorksProps) {
 
         {/* Timeline Layout */}
         <div className="relative">
-          {/* Connecting Line (Desktop) */}
-          <div className="hidden lg:block absolute top-[90px] left-[15%] right-[15%] h-0.5 border-t border-dashed border-slate-300 dark:border-slate-700 z-0" />
+          {/* Connecting Line with ScrollReveal for Slide-Up Effect */}
+          <ScrollReveal className="hidden lg:block absolute top-[48px] left-[15%] right-[15%] h-0.5 z-0">
+            <div className="w-full h-full border-t border-dashed border-slate-300 dark:border-slate-700" />
+          </ScrollReveal>
 
           {/* Steps Grid */}
           <div className="grid gap-12 lg:grid-cols-3 relative z-10">
@@ -80,15 +88,20 @@ export function HowItWorks({ isDark }: HowItWorksProps) {
                   }
                 >
                   <div className="flex flex-col items-center text-center px-4">
-                    {/* Circle Icon Container */}
+                    {/* Circle Icon Container - Base background blocks the line, overlay provides tint */}
                     <div
-                      className={`relative flex h-24 w-24 items-center justify-center rounded-full border shadow-xl transition-all duration-300 hover:scale-105 mb-6 ${step.color} ${step.glow}`}
+                      className={`relative flex h-24 w-24 items-center justify-center rounded-full border shadow-xl transition-all duration-300 hover:scale-105 mb-6 bg-[#F8FAFC] dark:bg-[#0F172A] ${step.textColor} ${step.borderColor} ${step.glow}`}
                     >
+                      {/* Semi-transparent color overlay layer */}
+                      <div className={`absolute inset-0 rounded-full ${step.bgTint} pointer-events-none`} />
+
                       {/* Step Number Badge */}
-                      <span className="absolute -top-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full bg-[#3B82F6] text-[12px] font-bold text-white shadow-md">
+                      <span className="absolute -top-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full bg-[#3B82F6] text-[12px] font-bold text-white shadow-md z-20">
                         {step.step}
                       </span>
-                      <Icon className="h-10 w-10" />
+                      
+                      {/* Step Icon */}
+                      <Icon className="h-10 w-10 relative z-10" />
                     </div>
 
                     {/* Step Title & Description */}

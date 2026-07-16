@@ -11,6 +11,7 @@
   "dependencies": {
     "axios": "^1.8.4",
     "clsx": "^2.1.1",
+    "framer-motion": "^12.42.2",
     "konva": "^9.3.18",
     "lucide-react": "^0.511.0",
     "react": "^18.3.1",

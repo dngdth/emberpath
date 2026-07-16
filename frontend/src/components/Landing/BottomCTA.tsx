@@ -11,18 +11,16 @@ export function BottomCTA({ isDark }: BottomCTAProps) {
 
   return (
     <section
-      className={`py-20 transition-colors duration-300 ${
-        isDark ? 'bg-[#0F172A]' : 'bg-white'
-      }`}
+      className={`py-20 transition-colors duration-300 ${isDark ? 'bg-[#0F172A]' : 'bg-white'
+        }`}
     >
       <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
         <ScrollReveal>
           <div
-            className={`relative rounded-3xl overflow-hidden px-8 py-12 md:py-16 text-center border shadow-2xl ${
-              isDark
-                ? 'bg-gradient-to-r from-[#1E293B] to-[#0F172A] border-slate-800'
-                : 'bg-gradient-to-r from-blue-500 to-indigo-600 border-transparent text-white'
-            }`}
+            className={`relative rounded-3xl overflow-hidden px-8 py-12 md:py-16 text-center border shadow-2xl ${isDark
+              ? 'bg-gradient-to-r from-[#486188] to-[#8c9cc2] border-slate-800'
+              : 'bg-gradient-to-r from-[#9fb6f5] to-[#1954b3] border-transparent text-white'
+              }`}
           >
             {/* Background elements */}
             <div className="absolute -top-10 -left-10 w-40 h-40 bg-white/5 rounded-full blur-xl pointer-events-none" />
@@ -36,18 +34,16 @@ export function BottomCTA({ isDark }: BottomCTAProps) {
 
               {/* Title */}
               <h2
-                className={`text-3xl md:text-4xl font-extrabold tracking-tight ${
-                  isDark ? 'text-white' : 'text-white'
-                }`}
+                className={`text-3xl md:text-4xl font-extrabold tracking-tight ${isDark ? 'text-white' : 'text-white'
+                  }`}
               >
                 Sẵn Sàng Nâng Cấp An Toàn Cho Tòa Nhà Của Bạn?
               </h2>
 
               {/* Subtitle */}
               <p
-                className={`text-base md:text-lg leading-relaxed ${
-                  isDark ? 'text-slate-300' : 'text-white/80'
-                }`}
+                className={`text-base md:text-lg leading-relaxed ${isDark ? 'text-slate-300' : 'text-white/80'
+                  }`}
               >
                 Đăng ký tài khoản Emberpath ngay hôm nay để quản lý sơ đồ tầng, tích hợp các cảm biến IoT và bảo đảm an toàn sơ tán khẩn cấp tự động cho tòa nhà của bạn.
               </p>
@@ -56,11 +52,10 @@ export function BottomCTA({ isDark }: BottomCTAProps) {
               <div className="pt-4">
                 <a
                   href={token ? '/dashboard' : '/register'}
-                  className={`inline-flex items-center gap-2 rounded-xl px-8 py-4 text-base font-bold transition-all hover:scale-[1.02] shadow-xl ${
-                    isDark
-                      ? 'bg-[#F97316] text-white hover:bg-orange-600 shadow-orange-500/15'
-                      : 'bg-white text-indigo-600 hover:bg-indigo-50 shadow-black/10'
-                  }`}
+                  className={`inline-flex items-center gap-2 rounded-xl px-8 py-4 text-base font-bold transition-all hover:scale-[1.03] active:scale-95 shadow-xl bg-gradient-to-r from-[#F97316] to-[#EA580C] text-white hover:from-orange-600 hover:to-orange-700 duration-300 ${isDark
+                    ? 'shadow-orange-500/25 border border-orange-500/10'
+                    : 'shadow-orange-600/30 border border-orange-400/20'
+                    }`}
                 >
                   {token ? 'Vào Bảng Điều Khiển' : 'Đăng ký ngay'}
                   <ArrowRight className="h-5 w-5" />

@@ -1,13 +1,13 @@
 import { useState } from 'react';
-import { Shield, Sun, Moon, Menu, X, LogIn } from 'lucide-react';
+import { Shield, Menu, X, LogIn } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
+import { SwitchTheme } from '../UI/SwitchTheme';
 
 interface NavbarProps {
   isDark: boolean;
-  setIsDark: (dark: boolean) => void;
 }
 
-export function Navbar({ isDark, setIsDark }: NavbarProps) {
+export function Navbar({ isDark }: NavbarProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { token, logout } = useAuthStore();
 
@@ -65,17 +65,7 @@ export function Navbar({ isDark, setIsDark }: NavbarProps) {
           {/* Action Buttons */}
           <div className="hidden md:flex items-center gap-4">
             {/* Dark Mode Toggle */}
-            <button
-              onClick={() => setIsDark(!isDark)}
-              className={`p-2 rounded-xl border transition-all ${
-                isDark
-                  ? 'border-slate-800 bg-slate-900 text-yellow-400 hover:bg-slate-800'
-                  : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
-              }`}
-              title="Toggle theme"
-            >
-              {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-            </button>
+            <SwitchTheme />
 
             {token ? (
               <div className="flex items-center gap-3">
@@ -120,16 +110,7 @@ export function Navbar({ isDark, setIsDark }: NavbarProps) {
 
           {/* Mobile menu button */}
           <div className="flex items-center gap-2 md:hidden">
-            <button
-              onClick={() => setIsDark(!isDark)}
-              className={`p-2 rounded-xl border transition-all ${
-                isDark
-                  ? 'border-slate-800 bg-slate-900 text-yellow-400'
-                  : 'border-slate-200 bg-slate-50 text-slate-600'
-              }`}
-            >
-              {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-            </button>
+            <SwitchTheme />
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className={`p-2 rounded-xl transition-colors ${

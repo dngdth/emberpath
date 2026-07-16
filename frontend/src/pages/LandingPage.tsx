@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { Navbar } from '../components/Landing/Navbar';
 import { HeroSection } from '../components/Landing/HeroSection';
 import { ProblemSolution } from '../components/Landing/ProblemSolution';
@@ -6,15 +6,27 @@ import { FeaturesSection } from '../components/Landing/FeaturesSection';
 import { HowItWorks } from '../components/Landing/HowItWorks';
 import { BottomCTA } from '../components/Landing/BottomCTA';
 import { Footer } from '../components/Landing/Footer';
+import { useThemeStore } from '../store/themeStore';
 
 export function LandingPage() {
-  // Defaulting to Dark Mode for the premium tech aesthetic as suggested
-  const [isDark, setIsDark] = useState<boolean>(true);
+  const { darkMode } = useThemeStore();
 
   // Set the document title on page load
   useEffect(() => {
     document.title = 'Emberpath – Giám Sát An Toàn & Sơ Tán Thông Minh';
   }, []);
+
+  // Sync dark class on documentElement
+  useEffect(() => {
+    const root = document.documentElement;
+    if (darkMode) {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+  }, [darkMode]);
+
+  const isDark = darkMode;
 
   return (
     <div
@@ -24,7 +36,7 @@ export function LandingPage() {
       style={{ fontFamily: "'Inter', sans-serif" }}
     >
       {/* Navbar */}
-      <Navbar isDark={isDark} setIsDark={setIsDark} />
+      <Navbar isDark={isDark} />
 
       {/* Hero Section */}
       <HeroSection isDark={isDark} />

@@ -84,12 +84,13 @@ async def ingest_device_reading(payload: DeviceIngestRequest, db: Session = Depe
     if not device:
         raise HTTPException(status_code=404, detail="Sensor device not found")
 
+    timestamp = payload.timestamp or datetime.utcnow()
     status = evaluate_sensor_status(payload.sensorType, payload.value, device.threshold)
     device.latest_value = payload.value
     device.latest_status = status
-    device.last_seen_at = payload.timestamp
-    db.add(SensorReading(device_id=device.id, value=payload.value, status=status, unit=payload.unit, created_at=payload.timestamp))
+    device.last_seen_at = timestamp
+    db.add(SensorReading(device_id=device.id, value=payload.value, status=status, unit=payload.unit, created_at=timestamp))
     db.commit()
 
-    await ws_manager.broadcast_to_building(building.id, {"type": "sensor_tick", "building_id": building.id, "timestamp": payload.timestamp.isoformat()})
+    await ws_manager.broadcast_to_building(building.id, {"type": "sensor_tick", "building_id": building.id, "timestamp": timestamp.isoformat()})
     return {"message": "Reading ingested", "status": status}

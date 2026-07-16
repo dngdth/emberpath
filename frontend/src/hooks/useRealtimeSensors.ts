@@ -4,7 +4,12 @@ import { DashboardSummary, SensorDevice } from '../types/sensor';
 import { getToken } from '../utils/authHelpers';
 
 // Danh sach device_id that tu ESP32 (khop voi buoi1.ino)
-const REAL_DEVICE_IDS = new Set(['temp-01', 'mq2-01', 'mq2-02', 'mq2-03']);
+const REAL_DEVICE_IDS = new Set([
+  'temp-master', 'mq2-master',
+  'temp-sat-1', 'mq2-sat-1',
+  'temp-sat-2', 'mq2-sat-2',
+  'temp-sat-3', 'mq2-sat-3'
+]);
 
 export function useRealtimeSensors(selectedFloor?: number | null, search?: string) {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);

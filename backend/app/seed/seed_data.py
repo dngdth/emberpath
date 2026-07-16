@@ -118,10 +118,14 @@ def seed_database(db: Session) -> None:
 
     # Chi giu lai sensor that dang chay tu ESP32
     device_specs = [
-        (building_a.id, floor1.id, "Lobby", "mq2-01", "MQ2 Lobby A",    "mq2",  600, 0,  "raw"),
-        (building_a.id, floor1.id, "Lobby", "mq2-02", "MQ2 Corridor A", "mq2",  600, 0,  "raw"),
-        (building_a.id, floor1.id, "Lobby", "mq2-03", "MQ2 Control A",  "mq2",  600, 0,  "raw"),
-        (building_a.id, floor1.id, "Lobby", "temp-01", "Temp Lobby A",  "temp", 50,  28, "C"),
+        (building_a.id, floor1.id, "Master Node", "temp-master", "Temp Master", "temp", 50, 26, "C"),
+        (building_a.id, floor1.id, "Master Node", "mq2-master", "MQ2 Master", "mq2", 600, 0, "raw"),
+        (building_a.id, floor1.id, "Satellite 1", "temp-sat-1", "Temp Sat 1", "temp", 50, 26, "C"),
+        (building_a.id, floor1.id, "Satellite 1", "mq2-sat-1", "MQ2 Sat 1", "mq2", 600, 0, "raw"),
+        (building_a.id, floor1.id, "Satellite 2", "temp-sat-2", "Temp Sat 2", "temp", 50, 26, "C"),
+        (building_a.id, floor1.id, "Satellite 2", "mq2-sat-2", "MQ2 Sat 2", "mq2", 600, 0, "raw"),
+        (building_a.id, floor1.id, "Satellite 3", "temp-sat-3", "Temp Sat 3", "temp", 50, 26, "C"),
+        (building_a.id, floor1.id, "Satellite 3", "mq2-sat-3", "MQ2 Sat 3", "mq2", 600, 0, "raw"),
     ]
     now = datetime.utcnow()
     for building_id, floor_id, room_name, device_id, name, sensor_type, threshold, latest_value, unit in device_specs:

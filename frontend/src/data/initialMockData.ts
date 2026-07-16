@@ -23,6 +23,7 @@ export function createNewObject(type: ObjectType, x = 120, y = 120): FloorPlanOb
     temp: 'Temp',
     led: 'LED',
     label: 'Label',
+    connector: 'Connector',
   }[type];
 
   return {

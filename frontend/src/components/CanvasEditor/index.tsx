@@ -189,7 +189,7 @@ export function CanvasEditor(props: Props) {
       y: object.y,
       draggable: !object.locked && !isPanning,
       rotation: object.rotation || 0,
-      dragBoundFunc: (pos) => pos,
+      dragBoundFunc: (pos: { x: number; y: number }) => pos,
 
       onClick: (event: Konva.KonvaEventObject<MouseEvent>) => {
         event.cancelBubble = true;

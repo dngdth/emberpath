@@ -83,3 +83,6 @@ Thumbs.db
 # Misc
 .cache/
 *.log
+
+# TypeScript build cache
+*.tsbuildinfo

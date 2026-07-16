@@ -12,6 +12,8 @@ class FloorPlan(Base):
     floor_id: Mapped[int] = mapped_column(ForeignKey("floors.id"), nullable=False, unique=True)
     canvas_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    canvas_width: Mapped[float] = mapped_column(Float, default=1600.0, nullable=False)
+    canvas_height: Mapped[float] = mapped_column(Float, default=1000.0, nullable=False)
 
     floor = relationship("Floor", back_populates="plan")
     objects = relationship("PlanObject", back_populates="plan", cascade="all, delete-orphan")

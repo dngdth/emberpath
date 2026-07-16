@@ -100,9 +100,21 @@ export function FloorEditorPage() {
   const [belowObjects, setBelowObjects] = useState<FloorPlanObject[]>([]);
   const [showBelowBaseline, setShowBelowBaseline] = useState<boolean>(true);
 
+  const [canvasWidth, setCanvasWidth] = useState<number>(1600);
+  const [canvasHeight, setCanvasHeight] = useState<number>(1000);
+
+  const canvasWidthRef = useRef<number>(1600);
+  const canvasHeightRef = useRef<number>(1000);
+  useEffect(() => {
+    canvasWidthRef.current = canvasWidth;
+  }, [canvasWidth]);
+  useEffect(() => {
+    canvasHeightRef.current = canvasHeight;
+  }, [canvasHeight]);
+
   // Editor engine hooks
   const history = useHistory<FloorPlanObject[]>([]);
-  const zoomPan = useZoomPan();
+  const zoomPan = useZoomPan(canvasWidth, canvasHeight);
   const selection = useSelection();
   const editor = useEditorState(history.state, history.set);
 
@@ -125,7 +137,11 @@ export function FloorEditorPage() {
     // Delay slightly to let React finish batching the state updates
     setTimeout(async () => {
       try {
-        await api.put(`/floors/${activeFloorId}/plan`, { objects: objectsRef.current });
+        await api.put(`/floors/${activeFloorId}/plan`, {
+          objects: objectsRef.current,
+          canvas_width: canvasWidthRef.current,
+          canvas_height: canvasHeightRef.current,
+        });
         setToast('Đã lưu sơ đồ thành công');
       } catch (err) {
         console.error('Failed to save plan:', err);
@@ -207,6 +223,14 @@ export function FloorEditorPage() {
     if (!editMode) return;
 
     function onKeyDown(event: KeyboardEvent) {
+      const activeEl = document.activeElement;
+      const isInput = activeEl && (
+        activeEl.tagName === 'INPUT' ||
+        activeEl.tagName === 'TEXTAREA' ||
+        activeEl.getAttribute('contenteditable') === 'true'
+      );
+      if (isInput) return;
+
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
         event.preventDefault();
         void savePlan();
@@ -351,6 +375,8 @@ export function FloorEditorPage() {
     setLoading(true);
     try {
       const { data } = await api.get<FloorPlanResponse>(`/floors/${floorId}/plan`);
+      setCanvasWidth(data.canvas_width ?? 1600);
+      setCanvasHeight(data.canvas_height ?? 1000);
       history.reset(data.objects);
       selection.clearSelection();
       setTimeout(() => {
@@ -724,6 +750,27 @@ export function FloorEditorPage() {
             </div>
           ) : (
             <CanvasEditor
+              canvasWidth={canvasWidth}
+              canvasHeight={canvasHeight}
+              onUpdateCanvasSize={(w, h) => {
+                setCanvasWidth(w);
+                setCanvasHeight(h);
+              }}
+              onCommitCanvasResize={(w, h, shiftX, shiftY) => {
+                setCanvasWidth(w);
+                setCanvasHeight(h);
+                if (shiftX !== 0 || shiftY !== 0) {
+                  const updatedObjects = history.state.map((obj) => {
+                    if (obj.type === 'connector') return obj;
+                    return {
+                      ...obj,
+                      x: obj.x + shiftX,
+                      y: obj.y + shiftY,
+                    };
+                  });
+                  history.set(updatedObjects);
+                }
+              }}
               safePath={safePath}
               objects={history.state}
               selectedIds={selection.selectedIds}
@@ -891,7 +938,16 @@ export function FloorEditorPage() {
           {/* Properties body scroll container */}
           <div className="p-4 overflow-y-auto flex-1 scrollbar-thin">
             {editMode ? (
-              <PropertyPanel object={selectedObject} onChange={updateSelectedObject} />
+              <PropertyPanel
+                object={selectedObject}
+                onChange={updateSelectedObject}
+                canvasWidth={canvasWidth}
+                canvasHeight={canvasHeight}
+                onCanvasSizeChange={(w, h) => {
+                  setCanvasWidth(w);
+                  setCanvasHeight(h);
+                }}
+              />
             ) : (
               <MonitorInfoSection
                 selectedObject={selectedObject}

@@ -53,6 +53,8 @@ export function DashboardPage() {
   // Load floor plan objects when selectedFloor changes
   const [objects, setObjects] = useState<FloorPlanObject[]>([]);
   const [loadingPlan, setLoadingPlan] = useState(false);
+  const [canvasWidth, setCanvasWidth] = useState<number>(1600);
+  const [canvasHeight, setCanvasHeight] = useState<number>(1000);
 
   useEffect(() => {
     // Fetch all floors on component mount
@@ -70,6 +72,8 @@ export function DashboardPage() {
       api.get<FloorPlanResponse>(`/floors/${selectedFloor}/plan`)
         .then((res) => {
           setObjects(res.data.objects);
+          setCanvasWidth(res.data.canvas_width ?? 1600);
+          setCanvasHeight(res.data.canvas_height ?? 1000);
           // Reset pathfinding states on floor switch
           setSafePath([]);
           setSelectedStartRoomId(null);
@@ -524,6 +528,8 @@ export function DashboardPage() {
                     selectedStartRoomId={selectedStartRoomId}
                     evacuationActive={evacuationActive}
                     isDark={isDark}
+                    canvasWidth={canvasWidth}
+                    canvasHeight={canvasHeight}
                   />
                 )}
               </div>

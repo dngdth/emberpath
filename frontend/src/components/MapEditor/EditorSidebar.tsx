@@ -69,7 +69,7 @@ export function EditorSidebar(props: Props) {
           </button>
         </div>
 
-        <TokenLibrary activeTool={props.activeTool} onSelect={props.onToolPick} />
+        <TokenLibrary activeTool={props.activeTool} onSelect={props.onToolPick as any} />
       </div>
 
       {/* Properties Section */}

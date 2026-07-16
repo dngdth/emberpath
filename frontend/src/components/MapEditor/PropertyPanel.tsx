@@ -8,7 +8,45 @@ import { ToggleLeft, ToggleRight, Radio, Shield, Settings, Compass, Palette } fr
 type Props = {
   object: FloorPlanObject | null;
   onChange: (patch: Partial<FloorPlanObject>) => void;
+  canvasWidth?: number;
+  canvasHeight?: number;
+  onCanvasSizeChange?: (width: number, height: number) => void;
 };
+
+interface DebouncedInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange'> {
+  value: string | number;
+  onChange: (value: string) => void;
+}
+
+export function DebouncedInput({ value, onChange, ...props }: DebouncedInputProps) {
+  const [localValue, setLocalValue] = useState(String(value));
+
+  useEffect(() => {
+    setLocalValue(String(value));
+  }, [value]);
+
+  const handleBlur = () => {
+    if (localValue !== String(value)) {
+      onChange(localValue);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.currentTarget.blur();
+    }
+  };
+
+  return (
+    <input
+      {...props}
+      value={localValue}
+      onChange={(e) => setLocalValue(e.target.value)}
+      onBlur={handleBlur}
+      onKeyDown={handleKeyDown}
+    />
+  );
+}
 
 interface SensorDeviceOption {
   device_id: string;
@@ -28,7 +66,7 @@ function updateNumber(
   }
 }
 
-export function PropertyPanel({ object, onChange }: Props) {
+export function PropertyPanel({ object, onChange, canvasWidth, canvasHeight, onCanvasSizeChange }: Props) {
   const { darkMode } = useThemeStore();
   const isDark = darkMode;
 
@@ -71,12 +109,57 @@ export function PropertyPanel({ object, onChange }: Props) {
 
   if (!object) {
     return (
-      <div
-        className={`rounded-2xl border border-dashed px-3 py-6 text-center text-xs ${
-          isDark ? 'border-slate-800 text-slate-500 bg-slate-950/10' : 'border-slate-200 text-slate-450 bg-slate-50'
-        }`}
-      >
-        Chọn một đối tượng trên sơ đồ thiết kế để cấu hình các thuộc tính.
+      <div className={`space-y-4 text-xs ${isDark ? 'text-slate-350' : 'text-slate-700'}`}>
+        <div className="space-y-2.5">
+          <div className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-blue-500 mb-1">
+            <Settings size={12} />
+            <span>Thuộc tính Bản vẽ</span>
+          </div>
+          <div className={`rounded-2xl border p-3 space-y-2.5 transition-colors duration-300 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+            <div className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-blue-500">
+              <Compass size={12} />
+              <span>Kích thước bản vẽ</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div>
+                <label className={clsx('mb-0.5 block text-[10px]', labelClass)}>Chiều rộng (px)</label>
+                <DebouncedInput
+                  type="number"
+                  value={canvasWidth ?? 1600}
+                  onChange={(val) => {
+                    const w = Math.max(400, Math.min(10000, Number(val) || 1600));
+                    onCanvasSizeChange?.(w, canvasHeight ?? 1000);
+                  }}
+                  className={inputClass}
+                />
+              </div>
+
+              <div>
+                <label className={clsx('mb-0.5 block text-[10px]', labelClass)}>Chiều cao (px)</label>
+                <DebouncedInput
+                  type="number"
+                  value={canvasHeight ?? 1000}
+                  onChange={(val) => {
+                    const h = Math.max(400, Math.min(10000, Number(val) || 1000));
+                    onCanvasSizeChange?.(canvasWidth ?? 1600, h);
+                  }}
+                  className={inputClass}
+                />
+              </div>
+            </div>
+            <p className="text-[9px] opacity-60 mt-1 leading-relaxed">
+              Thay đổi kích thước vùng vẽ màu trắng. Khuyên dùng từ 800px đến 4000px.
+            </p>
+          </div>
+        </div>
+        <div
+          className={`rounded-2xl border border-dashed px-3 py-6 text-center text-[11px] ${
+            isDark ? 'border-slate-800 text-slate-500 bg-slate-950/10' : 'border-slate-200 text-slate-450 bg-slate-50'
+          }`}
+        >
+          Chọn một đối tượng trên sơ đồ thiết kế để cấu hình các thuộc tính chi tiết.
+        </div>
       </div>
     );
   }
@@ -140,9 +223,9 @@ export function PropertyPanel({ object, onChange }: Props) {
 
           <div>
             <label className={clsx('mb-1 block font-bold', labelClass)}>Tên / Nhãn</label>
-            <input
+            <DebouncedInput
               value={object.name || ''}
-              onChange={(e) => onChange({ name: e.target.value })}
+              onChange={(val) => onChange({ name: val })}
               className={inputClass}
             />
           </div>
@@ -159,27 +242,27 @@ export function PropertyPanel({ object, onChange }: Props) {
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className={clsx('mb-0.5 block text-[10px]', labelClass)}>Tọa độ X</label>
-            <input
+            <DebouncedInput
               value={object.x ?? 0}
-              onChange={(e) => updateNumber(e.target.value, 'x', onChange)}
+              onChange={(val) => updateNumber(val, 'x', onChange)}
               className={inputClass}
             />
           </div>
 
           <div>
             <label className={clsx('mb-0.5 block text-[10px]', labelClass)}>Tọa độ Y</label>
-            <input
+            <DebouncedInput
               value={object.y ?? 0}
-              onChange={(e) => updateNumber(e.target.value, 'y', onChange)}
+              onChange={(val) => updateNumber(val, 'y', onChange)}
               className={inputClass}
             />
           </div>
 
           <div>
             <label className={clsx('mb-0.5 block text-[10px]', labelClass)}>Góc xoay (°)</label>
-            <input
+            <DebouncedInput
               value={object.rotation ?? 0}
-              onChange={(e) => updateNumber(e.target.value, 'rotation', onChange)}
+              onChange={(val) => updateNumber(val, 'rotation', onChange)}
               className={inputClass}
             />
           </div>
@@ -188,18 +271,18 @@ export function PropertyPanel({ object, onChange }: Props) {
             <>
               <div>
                 <label className={clsx('mb-0.5 block text-[10px]', labelClass)}>Chiều rộng (W)</label>
-                <input
+                <DebouncedInput
                   value={object.width ?? 0}
-                  onChange={(e) => updateNumber(e.target.value, 'width', onChange)}
+                  onChange={(val) => updateNumber(val, 'width', onChange)}
                   className={inputClass}
                 />
               </div>
 
               <div className="col-start-2">
                 <label className={clsx('mb-0.5 block text-[10px]', labelClass)}>Chiều cao (H)</label>
-                <input
+                <DebouncedInput
                   value={object.height ?? 0}
-                  onChange={(e) => updateNumber(e.target.value, 'height', onChange)}
+                  onChange={(val) => updateNumber(val, 'height', onChange)}
                   className={inputClass}
                 />
               </div>
@@ -218,30 +301,62 @@ export function PropertyPanel({ object, onChange }: Props) {
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className={clsx('mb-0.5 block text-[10px]', labelClass)}>Màu sắc</label>
-            <input
-              value={object.color || ''}
-              onChange={(e) => onChange({ color: e.target.value })}
-              placeholder="#ffffff"
-              className={inputClass}
-            />
+            <div className="relative flex items-center">
+              <div 
+                className="absolute left-2 w-5 h-5 rounded-md border shadow-sm flex-shrink-0"
+                style={{ 
+                  backgroundColor: object.color || (isDark ? '#111827' : '#ffffff'),
+                  borderColor: isDark ? '#334155' : '#cbd5e1' 
+                }}
+              >
+                <input
+                  type="color"
+                  value={object.color && /^#[0-9A-F]{6}$/i.test(object.color) ? object.color : '#ffffff'}
+                  onChange={(e) => onChange({ color: e.target.value })}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+              </div>
+              <DebouncedInput
+                value={object.color || ''}
+                onChange={(val) => onChange({ color: val })}
+                placeholder="#ffffff"
+                className={clsx(inputClass, 'pl-9 font-mono')}
+              />
+            </div>
           </div>
 
           <div>
             <label className={clsx('mb-0.5 block text-[10px]', labelClass)}>Màu chữ</label>
-            <input
-              value={object.textColor || ''}
-              onChange={(e) => onChange({ textColor: e.target.value })}
-              placeholder="#000000"
-              className={inputClass}
-            />
+            <div className="relative flex items-center">
+              <div 
+                className="absolute left-2 w-5 h-5 rounded-md border shadow-sm flex-shrink-0"
+                style={{ 
+                  backgroundColor: object.textColor || (isDark ? '#f8fafc' : '#000000'),
+                  borderColor: isDark ? '#334155' : '#cbd5e1' 
+                }}
+              >
+                <input
+                  type="color"
+                  value={object.textColor && /^#[0-9A-F]{6}$/i.test(object.textColor) ? object.textColor : '#000000'}
+                  onChange={(e) => onChange({ textColor: e.target.value })}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+              </div>
+              <DebouncedInput
+                value={object.textColor || ''}
+                onChange={(val) => onChange({ textColor: val })}
+                placeholder="#000000"
+                className={clsx(inputClass, 'pl-9 font-mono')}
+              />
+            </div>
           </div>
 
           {showText && (
             <div className="col-span-2">
               <label className={clsx('mb-0.5 block text-[10px]', labelClass)}>Kích thước Font</label>
-              <input
+              <DebouncedInput
                 value={object.fontSize ?? 16}
-                onChange={(e) => updateNumber(e.target.value, 'fontSize', onChange)}
+                onChange={(val) => updateNumber(val, 'fontSize', onChange)}
                 className={inputClass}
               />
             </div>

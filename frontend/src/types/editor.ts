@@ -31,4 +31,6 @@ export interface FloorPlanResponse {
   floor_name: string;
   objects: FloorPlanObject[];
   version: number;
+  canvas_width?: number;
+  canvas_height?: number;
 }

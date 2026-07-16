@@ -14,10 +14,9 @@ interface Props {
   selectedStartRoomId?: string | null;
   evacuationActive: boolean;
   isDark: boolean;
+  canvasWidth?: number;
+  canvasHeight?: number;
 }
-
-const CANVAS_WIDTH = 1600;
-const CANVAS_HEIGHT = 1000;
 
 export function FloorPlanViewer({
   objects,
@@ -27,7 +26,12 @@ export function FloorPlanViewer({
   selectedStartRoomId,
   evacuationActive,
   isDark,
+  canvasWidth,
+  canvasHeight,
 }: Props) {
+  const w = canvasWidth ?? 1600;
+  const h = canvasHeight ?? 1000;
+
   const stageRef = useRef<Konva.Stage | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
 
@@ -37,28 +41,8 @@ export function FloorPlanViewer({
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [panOrigin, setPanOrigin] = useState({ x: 0, y: 0 });
-  
-  // Blinking animation for danger rooms & status
-  const [blink, setBlink] = useState(true);
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setBlink((b) => !b);
-    }, 500);
-    return () => clearInterval(timer);
-  }, []);
 
-  // Flow animation for the evacuation path
-  const [dashOffset, setDashOffset] = useState(0);
-  useEffect(() => {
-    if (!evacuationActive) return;
-    let animId: number;
-    const tick = () => {
-      setDashOffset((prev) => (prev - 1) % 40);
-      animId = requestAnimationFrame(tick);
-    };
-    animId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animId);
-  }, [evacuationActive]);
+  const safePathLineRef = useRef<Konva.Line | null>(null);
 
   // Handle auto viewport resizing with throttling to smooth out layout transitions
   useEffect(() => {
@@ -293,7 +277,7 @@ export function FloorPlanViewer({
     
     if (isDanger) {
       return {
-        fill: blink ? 'rgba(239, 68, 68, 0.45)' : 'rgba(239, 68, 68, 0.25)',
+        fill: 'rgba(239, 68, 68, 0.45)',
         stroke: '#ef4444',
         strokeWidth: 3.5,
         shadowColor: '#ef4444',
@@ -362,6 +346,7 @@ export function FloorPlanViewer({
       return (
         <Group {...commonProps}>
           <Rect
+            name={isDanger ? "danger-blink" : undefined}
             width={w}
             height={h}
             fill={style.fill}
@@ -492,6 +477,7 @@ export function FloorPlanViewer({
       return (
         <Group {...commonProps}>
           <Circle
+            name={isDanger ? "danger-blink-sensor" : isWarning ? "warning-blink-sensor" : undefined}
             radius={22}
             x={22}
             y={22}
@@ -604,6 +590,48 @@ export function FloorPlanViewer({
     );
   };
 
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    let dashOffset = 0;
+
+    const anim = new Konva.Animation((frame) => {
+      if (!frame) return;
+      const time = frame.time;
+
+      // 1. Animate evacuation path line dashOffset
+      if (safePathLineRef.current && evacuationActive) {
+        const timeDiff = frame.timeDiff;
+        dashOffset = (dashOffset - (timeDiff * 0.05)) % 40;
+        safePathLineRef.current.dashOffset(dashOffset);
+      }
+
+      // 2. Animate blinking danger rooms & warning sensors (500ms intervals)
+      const isAlt = Math.floor(time / 500) % 2 === 0;
+
+      const dangerRoomsNodes = stage.find('.danger-blink');
+      dangerRoomsNodes.forEach((node) => {
+        (node as any).fill(isAlt ? 'rgba(239, 68, 68, 0.45)' : 'rgba(239, 68, 68, 0.25)');
+      });
+
+      const dangerSensors = stage.find('.danger-blink-sensor');
+      dangerSensors.forEach((node) => {
+        node.opacity(isAlt ? 1.0 : 0.4);
+      });
+
+      const warningSensors = stage.find('.warning-blink-sensor');
+      warningSensors.forEach((node) => {
+        node.opacity(isAlt ? 1.0 : 0.6);
+      });
+    });
+
+    anim.start();
+    return () => {
+      anim.stop();
+    };
+  }, [objects, dangerRooms, safePathPoints, evacuationActive]);
+
   return (
     <div
       ref={wrapperRef}
@@ -630,8 +658,8 @@ export function FloorPlanViewer({
             name="workspace-empty"
             x={position.x}
             y={position.y}
-            width={CANVAS_WIDTH * scale}
-            height={CANVAS_HEIGHT * scale}
+            width={w * scale}
+            height={h * scale}
             fill={isDark ? '#111827' : '#ffffff'}
             stroke={isDark ? '#1e293b' : '#e2e8f0'}
             strokeWidth={1}
@@ -653,13 +681,13 @@ export function FloorPlanViewer({
             {/* Evacuation Flow Route (High Fidelity Green Glowing Arrow Path) */}
             {safePathPoints && (
               <Line
+                ref={safePathLineRef}
                 points={safePathPoints}
                 stroke="#10b981"
                 strokeWidth={7}
                 lineJoin="round"
                 lineCap="round"
                 dash={[20, 15]}
-                dashOffset={dashOffset}
                 shadowColor="#10b981"
                 shadowBlur={16}
                 shadowOpacity={0.9}

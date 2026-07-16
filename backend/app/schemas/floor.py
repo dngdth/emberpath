@@ -31,10 +31,14 @@ class FloorPlanResponse(BaseModel):
     floor_name: str
     objects: list[PlanObjectIn]
     version: int
+    canvas_width: float = 1600.0
+    canvas_height: float = 1000.0
 
 
 class FloorPlanSaveRequest(BaseModel):
     objects: list[PlanObjectIn] = Field(default_factory=list)
+    canvas_width: float = 1600.0
+    canvas_height: float = 1000.0
 
 
 class FloorCreateRequest(BaseModel):

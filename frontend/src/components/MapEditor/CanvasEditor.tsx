@@ -32,6 +32,12 @@ interface Props {
   showBelowBaseline?: boolean;
   sensors?: SensorDevice[];
 
+  // Canvas size props
+  canvasWidth?: number;
+  canvasHeight?: number;
+  onUpdateCanvasSize?: (width: number, height: number) => void;
+  onCommitCanvasResize?: (width: number, height: number, shiftX: number, shiftY: number) => void;
+
   // Zoom Callbacks
   onZoomIn: () => void;
   onZoomOut: () => void;
@@ -39,11 +45,12 @@ interface Props {
   onReset: () => void;
 }
 
-const CANVAS_WIDTH = 4000;
-const CANVAS_HEIGHT = 2600;
 const GRID_SIZE = 24;
 
 export function CanvasEditor(props: Props) {
+  const canvasWidth = props.canvasWidth ?? 1600;
+  const canvasHeight = props.canvasHeight ?? 1000;
+
   const stageRef = useRef<Konva.Stage | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -51,9 +58,37 @@ export function CanvasEditor(props: Props) {
   const { darkMode } = useThemeStore();
   const isDark = darkMode;
 
+  const gridPattern = useMemo(() => {
+    if (typeof window === 'undefined') return null;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = GRID_SIZE;
+    canvas.height = GRID_SIZE;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    ctx.strokeStyle = isDark ? 'rgba(148, 163, 184, 0.05)' : 'rgba(157, 90, 70, 0.06)';
+    ctx.lineWidth = 1;
+
+    ctx.beginPath();
+    ctx.moveTo(GRID_SIZE, 0);
+    ctx.lineTo(GRID_SIZE, GRID_SIZE);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(0, GRID_SIZE);
+    ctx.lineTo(GRID_SIZE, GRID_SIZE);
+    ctx.stroke();
+
+    return canvas;
+  }, [isDark]);
+
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; objectId: string } | null>(null);
   const [guides, setGuides] = useState<Array<{ orientation: 'vertical' | 'horizontal'; value: number }>>([]);
   const [viewport, setViewport] = useState({ width: 1200, height: 760 });
+  const [hoveredEdge, setHoveredEdge] = useState<'left' | 'right' | 'top' | 'bottom' | null>(null);
+  const [dragResizeBounds, setDragResizeBounds] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const activeEdge: string | null = hoveredEdge;
 
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState<{ x: number; y: number } | null>(null);
@@ -65,8 +100,8 @@ export function CanvasEditor(props: Props) {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement;
       const isInput = activeEl && (
-        activeEl.tagName === 'INPUT' || 
-        activeEl.tagName === 'TEXTAREA' || 
+        activeEl.tagName === 'INPUT' ||
+        activeEl.tagName === 'TEXTAREA' ||
         activeEl.getAttribute('contenteditable') === 'true'
       );
       if (e.code === 'Space' && !isInput) {
@@ -101,26 +136,7 @@ export function CanvasEditor(props: Props) {
   const [editingTextVal, setEditingTextVal] = useState('');
   const [inputPos, setInputPos] = useState({ x: 0, y: 0, width: 100, height: 30, rotation: 0 });
 
-  // Blinking effect for danger rooms and warning sensors
-  const [blink, setBlink] = useState(true);
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setBlink((b) => !b);
-    }, 500);
-    return () => clearInterval(timer);
-  }, []);
-
-  // Flow animation offset for evacuation lines
-  const [dashOffset, setDashOffset] = useState(0);
-  useEffect(() => {
-    let animId: number;
-    const tick = () => {
-      setDashOffset((prev) => (prev - 1) % 40);
-      animId = requestAnimationFrame(tick);
-    };
-    animId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animId);
-  }, []);
+  const safePathLineRef = useRef<Konva.Line | null>(null);
 
   const selectedObjects = useMemo(
     () => props.objects.filter((object) => props.selectedIds.includes(object.id)),
@@ -388,7 +404,7 @@ export function CanvasEditor(props: Props) {
     if (object.type === 'room') {
       const isDanger = dangerRooms.has(object.id);
       if (isDanger) {
-        return blink ? 'rgba(239, 68, 68, 0.45)' : 'rgba(239, 68, 68, 0.25)';
+        return 'rgba(239, 68, 68, 0.45)';
       }
       return isDark ? 'rgba(16, 185, 129, 0.15)' : object.color || '#ead9cf';
     }
@@ -476,7 +492,6 @@ export function CanvasEditor(props: Props) {
       },
       onDragMove: (event: Konva.KonvaEventObject<DragEvent>) => {
         const next = { x: event.target.x(), y: event.target.y() };
-        props.onUpdateObject(object.id, next);
         setGuides(getGuideLines({ ...object, ...next }, props.objects));
       },
       onDragEnd: (event: Konva.KonvaEventObject<DragEvent>) => {
@@ -506,6 +521,7 @@ export function CanvasEditor(props: Props) {
       return (
         <Group {...commonProps}>
           <Rect
+            name={isRoomDanger ? "danger-blink" : undefined}
             width={width}
             height={height}
             fill={objectFill(object)}
@@ -632,6 +648,7 @@ export function CanvasEditor(props: Props) {
       return (
         <Group {...commonProps}>
           <Circle
+            name={isDanger ? "danger-blink-sensor" : isWarning ? "warning-blink-sensor" : undefined}
             radius={22}
             x={22}
             y={22}
@@ -736,6 +753,48 @@ export function CanvasEditor(props: Props) {
     );
   }
 
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    let dashOffset = 0;
+
+    const anim = new Konva.Animation((frame) => {
+      if (!frame) return;
+      const time = frame.time;
+
+      // 1. Animate evacuation path line dashOffset
+      if (safePathLineRef.current) {
+        const timeDiff = frame.timeDiff;
+        dashOffset = (dashOffset - (timeDiff * 0.05)) % 40;
+        safePathLineRef.current.dashOffset(dashOffset);
+      }
+
+      // 2. Animate blinking danger rooms & warning sensors (500ms intervals)
+      const isAlt = Math.floor(time / 500) % 2 === 0;
+
+      const dangerRoomsNodes = stage.find('.danger-blink');
+      dangerRoomsNodes.forEach((node) => {
+        (node as any).fill(isAlt ? 'rgba(239, 68, 68, 0.45)' : 'rgba(239, 68, 68, 0.25)');
+      });
+
+      const dangerSensors = stage.find('.danger-blink-sensor');
+      dangerSensors.forEach((node) => {
+        node.opacity(isAlt ? 1.0 : 0.4);
+      });
+
+      const warningSensors = stage.find('.warning-blink-sensor');
+      warningSensors.forEach((node) => {
+        node.opacity(isAlt ? 1.0 : 0.6);
+      });
+    });
+
+    anim.start();
+    return () => {
+      anim.stop();
+    };
+  }, [props.objects, dangerRooms, safePathPoints]);
+
   return (
     <div
       ref={wrapperRef}
@@ -761,8 +820,8 @@ export function CanvasEditor(props: Props) {
             name="workspace-empty"
             x={props.position.x}
             y={props.position.y}
-            width={CANVAS_WIDTH * props.scale}
-            height={CANVAS_HEIGHT * props.scale}
+            width={canvasWidth * props.scale}
+            height={canvasHeight * props.scale}
             fill={isDark ? '#111827' : '#ffffff'}
             stroke={isDark ? '#1e293b' : '#e2e8f0'}
             cornerRadius={28}
@@ -774,28 +833,18 @@ export function CanvasEditor(props: Props) {
 
         <Layer>
           <Group x={props.position.x} y={props.position.y} scaleX={props.scale} scaleY={props.scale}>
-            {/* Draw Grid Guidelines in Edit Mode */}
-            {props.editMode &&
-              Array.from({ length: Math.ceil(CANVAS_WIDTH / GRID_SIZE) + 1 }).map((_, index) => (
-                <Line
-                  key={`v-${index}`}
-                  name="workspace-grid"
-                  points={[index * GRID_SIZE, 0, index * GRID_SIZE, CANVAS_HEIGHT]}
-                  stroke={isDark ? 'rgba(148, 163, 184, 0.04)' : 'rgba(157, 90, 70, 0.05)'}
-                  strokeWidth={1}
-                />
-              ))}
-
-            {props.editMode &&
-              Array.from({ length: Math.ceil(CANVAS_HEIGHT / GRID_SIZE) + 1 }).map((_, index) => (
-                <Line
-                  key={`h-${index}`}
-                  name="workspace-grid"
-                  points={[0, index * GRID_SIZE, CANVAS_WIDTH, index * GRID_SIZE]}
-                  stroke={isDark ? 'rgba(148, 163, 184, 0.04)' : 'rgba(157, 90, 70, 0.05)'}
-                  strokeWidth={1}
-                />
-              ))}
+            {props.editMode && gridPattern && (
+              <Rect
+                name="workspace-grid"
+                x={0}
+                y={0}
+                width={canvasWidth}
+                height={canvasHeight}
+                fillPatternImage={gridPattern as any}
+                fillPatternRepeat="repeat"
+                listening={false}
+              />
+            )}
 
             {/* Baseline Floor Below Rendering */}
             {props.showBelowBaseline &&
@@ -857,13 +906,13 @@ export function CanvasEditor(props: Props) {
             {/* Safe Escape Route Glowing Flow Arrow Line */}
             {safePathPoints && (
               <Line
+                ref={safePathLineRef}
                 points={safePathPoints}
                 stroke="#10b981"
                 strokeWidth={7}
                 lineJoin="round"
                 lineCap="round"
                 dash={[20, 15]}
-                dashOffset={dashOffset}
                 shadowColor="#10b981"
                 shadowBlur={12}
                 shadowOpacity={0.8}
@@ -877,14 +926,14 @@ export function CanvasEditor(props: Props) {
                 guide.orientation === 'vertical' ? (
                   <Line
                     key={`guide-${index}`}
-                    points={[guide.value, 0, guide.value, CANVAS_HEIGHT]}
+                    points={[guide.value, 0, guide.value, canvasHeight]}
                     stroke="#c2410c"
                     dash={[4, 6]}
                   />
                 ) : (
                   <Line
                     key={`guide-${index}`}
-                    points={[0, guide.value, CANVAS_WIDTH, guide.value]}
+                    points={[0, guide.value, canvasWidth, guide.value]}
                     stroke="#c2410c"
                     dash={[4, 6]}
                   />
@@ -907,6 +956,249 @@ export function CanvasEditor(props: Props) {
                   newBox.width < 14 || newBox.height < 14 ? oldBox : newBox
                 }
               />
+            )}
+
+            {/* Edge and Corner Resizers */}
+            {props.editMode && props.selectedIds.length === 0 && (
+              <Group>
+                {/* Left Edge Resizer */}
+                <Line
+                  points={[0, 0, 0, canvasHeight]}
+                  stroke={activeEdge === 'left' || (dragResizeBounds && activeEdge === 'left') ? '#3b82f6' : 'transparent'}
+                  strokeWidth={6}
+                  hitStrokeWidth={16}
+                  draggable
+                  onDragStart={() => setHoveredEdge('left')}
+                  onDragMove={(e) => {
+                    const node = e.target;
+                    const rawDx = node.x();
+                    const newW = Math.max(400, Math.min(10000, canvasWidth - rawDx));
+                    const constrainedDx = canvasWidth - newW;
+                    setDragResizeBounds({ x: constrainedDx, y: 0, w: newW, h: canvasHeight });
+                    node.y(0);
+                  }}
+                  onDragEnd={(e) => {
+                    const finalW = dragResizeBounds?.w ?? canvasWidth;
+                    const shiftX = canvasWidth - finalW;
+                    props.onCommitCanvasResize?.(finalW, canvasHeight, shiftX, 0);
+                    setDragResizeBounds(null);
+                    setHoveredEdge(null);
+                    const node = e.target;
+                    node.x(0);
+                    node.y(0);
+                  }}
+                  onMouseEnter={(e) => {
+                    setHoveredEdge('left');
+                    const stage = e.target.getStage();
+                    if (stage) stage.container().style.cursor = 'ew-resize';
+                  }}
+                  onMouseLeave={(e) => {
+                    setHoveredEdge(null);
+                    const stage = e.target.getStage();
+                    if (stage) stage.container().style.cursor = 'default';
+                  }}
+                />
+
+                {/* Right Edge Resizer */}
+                <Line
+                  points={[canvasWidth, 0, canvasWidth, canvasHeight]}
+                  stroke={activeEdge === 'right' || (dragResizeBounds && activeEdge === 'right') ? '#3b82f6' : 'transparent'}
+                  strokeWidth={6}
+                  hitStrokeWidth={16}
+                  draggable
+                  onDragStart={() => setHoveredEdge('right')}
+                  onDragMove={(e) => {
+                    const node = e.target;
+                    const rawDx = node.x();
+                    const newW = Math.max(400, Math.min(10000, canvasWidth + rawDx));
+                    setDragResizeBounds({ x: 0, y: 0, w: newW, h: canvasHeight });
+                    node.y(0);
+                  }}
+                  onDragEnd={(e) => {
+                    const finalW = dragResizeBounds?.w ?? canvasWidth;
+                    props.onCommitCanvasResize?.(finalW, canvasHeight, 0, 0);
+                    setDragResizeBounds(null);
+                    setHoveredEdge(null);
+                    const node = e.target;
+                    node.x(0);
+                    node.y(0);
+                  }}
+                  onMouseEnter={(e) => {
+                    setHoveredEdge('right');
+                    const stage = e.target.getStage();
+                    if (stage) stage.container().style.cursor = 'ew-resize';
+                  }}
+                  onMouseLeave={(e) => {
+                    setHoveredEdge(null);
+                    const stage = e.target.getStage();
+                    if (stage) stage.container().style.cursor = 'default';
+                  }}
+                />
+
+                {/* Top Edge Resizer */}
+                <Line
+                  points={[0, 0, canvasWidth, 0]}
+                  stroke={activeEdge === 'top' || (dragResizeBounds && activeEdge === 'top') ? '#3b82f6' : 'transparent'}
+                  strokeWidth={6}
+                  hitStrokeWidth={16}
+                  draggable
+                  onDragStart={() => setHoveredEdge('top')}
+                  onDragMove={(e) => {
+                    const node = e.target;
+                    const rawDy = node.y();
+                    const newH = Math.max(400, Math.min(10000, canvasHeight - rawDy));
+                    const constrainedDy = canvasHeight - newH;
+                    setDragResizeBounds({ x: 0, y: constrainedDy, w: canvasWidth, h: newH });
+                    node.x(0);
+                  }}
+                  onDragEnd={(e) => {
+                    const finalH = dragResizeBounds?.h ?? canvasHeight;
+                    const shiftY = canvasHeight - finalH;
+                    props.onCommitCanvasResize?.(canvasWidth, finalH, 0, shiftY);
+                    setDragResizeBounds(null);
+                    setHoveredEdge(null);
+                    const node = e.target;
+                    node.x(0);
+                    node.y(0);
+                  }}
+                  onMouseEnter={(e) => {
+                    setHoveredEdge('top');
+                    const stage = e.target.getStage();
+                    if (stage) stage.container().style.cursor = 'ns-resize';
+                  }}
+                  onMouseLeave={(e) => {
+                    setHoveredEdge(null);
+                    const stage = e.target.getStage();
+                    if (stage) stage.container().style.cursor = 'default';
+                  }}
+                />
+
+                {/* Bottom Edge Resizer */}
+                <Line
+                  points={[0, canvasHeight, canvasWidth, canvasHeight]}
+                  stroke={activeEdge === 'bottom' || (dragResizeBounds && activeEdge === 'bottom') ? '#3b82f6' : 'transparent'}
+                  strokeWidth={6}
+                  hitStrokeWidth={16}
+                  draggable
+                  onDragStart={() => setHoveredEdge('bottom')}
+                  onDragMove={(e) => {
+                    const node = e.target;
+                    const rawDy = node.y();
+                    const newH = Math.max(400, Math.min(10000, canvasHeight + rawDy));
+                    setDragResizeBounds({ x: 0, y: 0, w: canvasWidth, h: newH });
+                    node.x(0);
+                  }}
+                  onDragEnd={(e) => {
+                    const finalH = dragResizeBounds?.h ?? canvasHeight;
+                    props.onCommitCanvasResize?.(canvasWidth, finalH, 0, 0);
+                    setDragResizeBounds(null);
+                    setHoveredEdge(null);
+                    const node = e.target;
+                    node.x(0);
+                    node.y(0);
+                  }}
+                  onMouseEnter={(e) => {
+                    setHoveredEdge('bottom');
+                    const stage = e.target.getStage();
+                    if (stage) stage.container().style.cursor = 'ns-resize';
+                  }}
+                  onMouseLeave={(e) => {
+                    setHoveredEdge(null);
+                    const stage = e.target.getStage();
+                    if (stage) stage.container().style.cursor = 'default';
+                  }}
+                />
+
+                {/* Corner Resize Handle */}
+                <Group
+                  x={canvasWidth}
+                  y={canvasHeight}
+                  draggable
+                  onDragStart={() => setHoveredEdge('right')}
+                  onDragMove={(e) => {
+                    const node = e.target;
+                    const rawDx = node.x() - canvasWidth;
+                    const rawDy = node.y() - canvasHeight;
+                    const newW = Math.max(400, Math.min(10000, canvasWidth + rawDx));
+                    const newH = Math.max(400, Math.min(10000, canvasHeight + rawDy));
+                    setDragResizeBounds({ x: 0, y: 0, w: newW, h: newH });
+                  }}
+                  onDragEnd={(e) => {
+                    const finalW = dragResizeBounds?.w ?? canvasWidth;
+                    const finalH = dragResizeBounds?.h ?? canvasHeight;
+                    props.onCommitCanvasResize?.(finalW, finalH, 0, 0);
+                    setDragResizeBounds(null);
+                    setHoveredEdge(null);
+                    const node = e.target;
+                    node.x(canvasWidth);
+                    node.y(canvasHeight);
+                  }}
+                  onMouseEnter={(e) => {
+                    const stage = e.target.getStage();
+                    if (stage) stage.container().style.cursor = 'nwse-resize';
+                  }}
+                  onMouseLeave={(e) => {
+                    const stage = e.target.getStage();
+                    if (stage) stage.container().style.cursor = 'default';
+                  }}
+                >
+                  <Circle
+                    radius={10}
+                    fill="#3b82f6"
+                    stroke="#ffffff"
+                    strokeWidth={2}
+                    shadowColor="rgba(0, 0, 0, 0.25)"
+                    shadowBlur={6}
+                  />
+                  <Line
+                    points={[-3, 0, 0, -3, 3, 0]}
+                    stroke="#ffffff"
+                    strokeWidth={1.5}
+                  />
+                </Group>
+              </Group>
+            )}
+
+            {/* Drag Resize Bounds Guide Box & Tooltip */}
+            {dragResizeBounds && (
+              <>
+                <Rect
+                  x={dragResizeBounds.x}
+                  y={dragResizeBounds.y}
+                  width={dragResizeBounds.w}
+                  height={dragResizeBounds.h}
+                  stroke="#3b82f6"
+                  strokeWidth={2}
+                  dash={[6, 4]}
+                  listening={false}
+                />
+                <Group
+                  x={dragResizeBounds.x + dragResizeBounds.w / 2 - 40}
+                  y={dragResizeBounds.y + dragResizeBounds.h / 2 - 10}
+                >
+                  <Rect
+                    width={80}
+                    height={20}
+                    fill={isDark ? '#0f172a' : '#ffffff'}
+                    cornerRadius={6}
+                    stroke="#3b82f6"
+                    strokeWidth={1}
+                    shadowColor="rgba(0, 0, 0, 0.15)"
+                    shadowBlur={4}
+                    listening={false}
+                  />
+                  <Text
+                    text={`${Math.round(dragResizeBounds.w)} × ${Math.round(dragResizeBounds.h)}`}
+                    width={80}
+                    align="center"
+                    y={5}
+                    fill={isDark ? '#cbd5e1' : '#334155'}
+                    fontSize={9}
+                    fontStyle="bold"
+                    listening={false}
+                  />
+                </Group>
+              </>
             )}
           </Group>
         </Layer>
@@ -967,47 +1259,43 @@ export function CanvasEditor(props: Props) {
       {props.editMode && selectedObjects.length > 0 && (
         <div
           className={clsx(
-            'absolute right-4 top-4 z-20 flex gap-2 rounded-2xl border p-2 text-xs shadow-xl transition-colors duration-300',
+            'absolute left-1/2 top-4 z-20 flex -translate-x-1/2 gap-2 rounded-2xl border p-2 text-xs shadow-xl transition-colors duration-300 items-center',
             isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
           )}
         >
-          <span className="flex items-center px-1 font-semibold">{selectedObjects.length} selected</span>
+          <span className="flex items-center px-1 font-semibold whitespace-nowrap">{selectedObjects.length} đã chọn</span>
           <button
             onClick={() => props.onContextAction('duplicate', selectedObjects[0].id)}
             className={clsx(
-              'rounded-xl px-3 py-1.5 font-bold transition',
+              'rounded-xl px-3 py-1.5 font-bold transition whitespace-nowrap',
               isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-750'
             )}
           >
-            Duplicate
+            Nhân đôi
           </button>
+
+          {selectedObjects.length === 2 && (
+            <>
+              <button
+                onClick={() => props.onContextAction('connect_nodes', '')}
+                className="rounded-xl bg-blue-600 px-3 py-1.5 font-bold text-white hover:bg-blue-700 transition whitespace-nowrap"
+              >
+                Kết nối các nút
+              </button>
+              <button
+                onClick={() => props.onContextAction('find_path', '')}
+                className="rounded-xl bg-emerald-600 px-3 py-1.5 font-bold text-white hover:bg-emerald-700 transition whitespace-nowrap"
+              >
+                Tìm đường đi an toàn
+              </button>
+            </>
+          )}
+
           <button
             onClick={() => props.onContextAction('delete', selectedObjects[0].id)}
-            className="rounded-xl bg-rose-600 px-3 py-1.5 font-bold text-white hover:bg-rose-700 active:scale-95"
+            className="rounded-xl bg-rose-600 px-3 py-1.5 font-bold text-white hover:bg-rose-700 active:scale-95 whitespace-nowrap"
           >
-            Delete
-          </button>
-        </div>
-      )}
-
-      {props.editMode && selectedObjects.length === 2 && (
-        <div
-          className={clsx(
-            'absolute left-1/2 top-4 z-20 flex -translate-x-1/2 gap-2 rounded-2xl border p-2 text-xs shadow-xl transition-colors duration-300',
-            isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
-          )}
-        >
-          <button
-            onClick={() => props.onContextAction('connect_nodes', '')}
-            className="rounded-xl bg-blue-600 px-4 py-2 font-bold text-white hover:bg-blue-700 transition"
-          >
-            Connect Nodes
-          </button>
-          <button
-            onClick={() => props.onContextAction('find_path', '')}
-            className="rounded-xl bg-emerald-600 px-4 py-2 font-bold text-white hover:bg-emerald-700 transition"
-          >
-            Find Safe Path
+            Xóa
           </button>
         </div>
       )}

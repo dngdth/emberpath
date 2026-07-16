@@ -102,15 +102,21 @@ export function FloorEditorPage() {
 
   const [canvasWidth, setCanvasWidth] = useState<number>(1600);
   const [canvasHeight, setCanvasHeight] = useState<number>(1000);
+  const [canvasShape, setCanvasShape] = useState<'rect' | 'l-shape' | 'polygon'>('rect');
 
   const canvasWidthRef = useRef<number>(1600);
   const canvasHeightRef = useRef<number>(1000);
+  const canvasShapeRef = useRef<'rect' | 'l-shape' | 'polygon'>('rect');
+
   useEffect(() => {
     canvasWidthRef.current = canvasWidth;
   }, [canvasWidth]);
   useEffect(() => {
     canvasHeightRef.current = canvasHeight;
   }, [canvasHeight]);
+  useEffect(() => {
+    canvasShapeRef.current = canvasShape;
+  }, [canvasShape]);
 
   // Editor engine hooks
   const history = useHistory<FloorPlanObject[]>([]);
@@ -141,6 +147,7 @@ export function FloorEditorPage() {
           objects: objectsRef.current,
           canvas_width: canvasWidthRef.current,
           canvas_height: canvasHeightRef.current,
+          canvas_shape: canvasShapeRef.current,
         });
         setToast('Đã lưu sơ đồ thành công');
       } catch (err) {
@@ -377,6 +384,7 @@ export function FloorEditorPage() {
       const { data } = await api.get<FloorPlanResponse>(`/floors/${floorId}/plan`);
       setCanvasWidth(data.canvas_width ?? 1600);
       setCanvasHeight(data.canvas_height ?? 1000);
+      setCanvasShape(data.canvas_shape ?? 'rect');
       history.reset(data.objects);
       selection.clearSelection();
       setTimeout(() => {
@@ -390,7 +398,7 @@ export function FloorEditorPage() {
 
 
 
-  function handleToolPick(type: ObjectType | 'select') {
+  function handleToolPick(type: string) {
     editor.setActiveTool(type);
   }
 
@@ -452,6 +460,11 @@ export function FloorEditorPage() {
   }
 
   function handleContextAction(action: string, objectId: string) {
+    if (action === 'select') {
+      editor.setActiveTool('select');
+      return;
+    }
+
     if (action === 'connect_nodes' && selection.selectedIds.length === 2) {
       editor.createConnector(selection.selectedIds[0], selection.selectedIds[1]);
       selection.clearSelection();
@@ -784,6 +797,9 @@ export function FloorEditorPage() {
                 if (patch.position) zoomPan.setPosition(patch.position);
               }}
               onAddObject={editor.addObject}
+              onAddCustomObject={(obj) => {
+                history.set([...history.state, obj]);
+              }}
               onSelect={(id, append) => (append ? selection.toggleSelection(id) : selection.selectOne(id))}
               onClearSelection={selection.clearSelection}
               onSelectionBox={selection.setSelectedIds}
@@ -947,6 +963,7 @@ export function FloorEditorPage() {
                   setCanvasWidth(w);
                   setCanvasHeight(h);
                 }}
+                floors={floors}
               />
             ) : (
               <MonitorInfoSection

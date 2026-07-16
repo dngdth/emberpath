@@ -3,10 +3,11 @@ import Konva from 'konva';
 import { Circle, Group, Layer, Line, Rect, Stage, Text, Transformer } from 'react-konva';
 import { FloorPlanObject } from '../../types/editor';
 import { SensorDevice } from '../../types/sensor';
-import { getDefaultSize, isResizable } from '../../utils/geometryHelpers';
+import { getDefaultSize, isResizable, getCanvasPoints, connectorIntersectsWall, isPointInPolygon } from '../../utils/geometryHelpers';
 import { snapPosition } from '../../utils/snapHelpers';
 import { getGuideLines } from '../../utils/snapHelpers';
 import { useThemeStore } from '../../store/themeStore';
+import { createNewObject } from '../../data/initialMockData';
 import clsx from 'clsx';
 
 interface Props {
@@ -18,6 +19,7 @@ interface Props {
   snapEnabled: boolean;
   onStageChange: (patch: { scale?: number; position?: { x: number; y: number } }) => void;
   onAddObject: (type: FloorPlanObject['type'], x: number, y: number) => void;
+  onAddCustomObject?: (obj: FloorPlanObject) => void;
   onSelect: (id: string, append: boolean) => void;
   onClearSelection: () => void;
   onUpdateObject: (id: string, patch: Partial<FloorPlanObject>) => void;
@@ -58,6 +60,16 @@ export function CanvasEditor(props: Props) {
   const { darkMode } = useThemeStore();
   const isDark = darkMode;
 
+  // Pen tool drawing state
+  const [drawingState, setDrawingState] = useState<{
+    type: 'floor_base' | 'room';
+    startX: number;
+    startY: number;
+    points: number[];
+  } | null>(null);
+
+  const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
+
   const gridPattern = useMemo(() => {
     if (typeof window === 'undefined') return null;
 
@@ -67,7 +79,7 @@ export function CanvasEditor(props: Props) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
 
-    ctx.strokeStyle = isDark ? 'rgba(148, 163, 184, 0.05)' : 'rgba(157, 90, 70, 0.06)';
+    ctx.strokeStyle = isDark ? 'rgba(100, 116, 139, 0.4)' : 'rgba(148, 163, 184, 0.25)';
     ctx.lineWidth = 1;
 
     ctx.beginPath();
@@ -108,6 +120,13 @@ export function CanvasEditor(props: Props) {
         e.preventDefault();
         setIsSpacePressed(true);
       }
+      if (e.code === 'Escape') {
+        if (drawingState) {
+          setDrawingState(null);
+          props.onContextAction('select', '');
+          e.preventDefault();
+        }
+      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -118,6 +137,7 @@ export function CanvasEditor(props: Props) {
 
     const handleBlur = () => {
       setIsSpacePressed(false);
+      setDrawingState(null);
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -129,7 +149,7 @@ export function CanvasEditor(props: Props) {
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', handleBlur);
     };
-  }, []);
+  }, [drawingState]);
 
   // States for inline text editor
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
@@ -186,16 +206,30 @@ export function CanvasEditor(props: Props) {
 
     props.objects.forEach((obj) => {
       if (obj.type === 'room') {
-        const rx = obj.x;
-        const ry = obj.y;
-        const rw = obj.width || 240;
-        const rh = obj.height || 140;
+        const isPolygon = obj.shapeType === 'polygon';
+        const pts = obj.points;
 
-        const hasDanger = dangerPositions.some(
-          (p) => p.x >= rx && p.x <= rx + rw && p.y >= ry && p.y <= ry + rh
-        );
-        if (hasDanger) {
-          rooms.add(obj.id);
+        if (isPolygon && pts && pts.length >= 6) {
+          const poly = [];
+          for (let i = 0; i < pts.length; i += 2) {
+            poly.push({ x: obj.x + pts[i], y: obj.y + pts[i + 1] });
+          }
+          const hasDanger = dangerPositions.some((p) => isPointInPolygon(p.x, p.y, poly));
+          if (hasDanger) {
+            rooms.add(obj.id);
+          }
+        } else {
+          const rx = obj.x;
+          const ry = obj.y;
+          const rw = obj.width || 240;
+          const rh = obj.height || 140;
+
+          const hasDanger = dangerPositions.some(
+            (p) => p.x >= rx && p.x <= rx + rw && p.y >= ry && p.y <= ry + rh
+          );
+          if (hasDanger) {
+            rooms.add(obj.id);
+          }
         }
       }
     });
@@ -244,7 +278,13 @@ export function CanvasEditor(props: Props) {
       .map((id) => stageRef.current?.findOne(`#${id}`))
       .filter(Boolean) as Konva.Node[];
 
-    transformerRef.current.nodes(nodes);
+    // Do not attach transformer box around polygon floor bases / rooms to let handles stand out clearly
+    const activeNodes = nodes.filter(node => {
+      const obj = props.objects.find(o => o.id === node.id());
+      return !(obj?.shapeType === 'polygon');
+    });
+
+    transformerRef.current.nodes(activeNodes);
     transformerRef.current.getLayer()?.batchDraw();
   }, [props.selectedIds, props.objects]);
 
@@ -264,8 +304,7 @@ export function CanvasEditor(props: Props) {
   function clickedOnEmptyArea(target: Konva.Node) {
     return (
       target === target.getStage() ||
-      target.hasName('workspace-empty') ||
-      target.hasName('workspace-grid')
+      target.hasName('workspace-empty')
     );
   }
 
@@ -282,6 +321,69 @@ export function CanvasEditor(props: Props) {
     const emptyArea = clickedOnEmptyArea(target);
 
     const isPanningAction = isSpacePressed || event.evt.button === 1;
+
+    // Drawing Mode click logic (Pen Tool)
+    const isPenTool = props.activeTool === 'room-pen' || props.activeTool === 'floor_base-pen';
+    if (props.editMode && isPenTool && !isPanningAction) {
+      const pointer = stagePointerToWorld();
+      if (!pointer) return;
+
+      const type = props.activeTool === 'room-pen' ? 'room' : 'floor_base';
+
+      if (!drawingState) {
+        setDrawingState({
+          type,
+          startX: pointer.x,
+          startY: pointer.y,
+          points: [0, 0],
+        });
+      } else {
+        const dx = pointer.x - drawingState.startX;
+        const dy = pointer.y - drawingState.startY;
+        const distToStart = Math.hypot(dx, dy);
+
+        // Click close to starting point to close polygon (minimum 3 points required)
+        if (distToStart < 12 && drawingState.points.length >= 6) {
+          let minX = Infinity;
+          let minY = Infinity;
+          for (let i = 0; i < drawingState.points.length; i += 2) {
+            const px = drawingState.startX + drawingState.points[i];
+            const py = drawingState.startY + drawingState.points[i + 1];
+            minX = Math.min(minX, px);
+            minY = Math.min(minY, py);
+          }
+
+          const relativePoints = [];
+          for (let i = 0; i < drawingState.points.length; i += 2) {
+            relativePoints.push(drawingState.startX + drawingState.points[i] - minX);
+            relativePoints.push(drawingState.startY + drawingState.points[i + 1] - minY);
+          }
+
+          const newObj = {
+            ...createNewObject(drawingState.type + '-pen', minX, minY),
+            points: relativePoints,
+          };
+
+          if (props.onAddCustomObject) {
+            props.onAddCustomObject(newObj);
+          } else {
+            props.onAddObject(newObj.type, minX, minY);
+          }
+          
+          setDrawingState(null);
+          props.onSelect(newObj.id, false);
+          props.onContextAction('select', '');
+          return;
+        }
+
+        // Add next point
+        setDrawingState({
+          ...drawingState,
+          points: [...drawingState.points, dx, dy],
+        });
+      }
+      return;
+    }
 
     // Adding objects on click if a tool is active (Edit Mode only), unless trying to pan
     if (props.editMode && props.activeTool !== 'select' && !isPanningAction) {
@@ -309,17 +411,23 @@ export function CanvasEditor(props: Props) {
   }
 
   function handleMouseMove(event: Konva.KonvaEventObject<MouseEvent>) {
-    if (!isPanning || !panStart || !panOrigin) return;
+    if (isPanning && panStart && panOrigin) {
+      const dx = event.evt.clientX - panStart.x;
+      const dy = event.evt.clientY - panStart.y;
 
-    const dx = event.evt.clientX - panStart.x;
-    const dy = event.evt.clientY - panStart.y;
+      props.onStageChange({
+        position: {
+          x: panOrigin.x + dx,
+          y: panOrigin.y + dy,
+        },
+      });
+      return;
+    }
 
-    props.onStageChange({
-      position: {
-        x: panOrigin.x + dx,
-        y: panOrigin.y + dy,
-      },
-    });
+    const pointer = stagePointerToWorld();
+    if (pointer) {
+      setMousePos(pointer);
+    }
   }
 
   function handleMouseUp() {
@@ -401,16 +509,21 @@ export function CanvasEditor(props: Props) {
   }
 
   function objectFill(object: FloorPlanObject) {
+    if (object.type === 'floor_base') {
+      return isDark ? 'rgba(30, 41, 59, 0.6)' : 'rgba(203, 213, 225, 0.5)';
+    }
     if (object.type === 'room') {
       const isDanger = dangerRooms.has(object.id);
       if (isDanger) {
         return 'rgba(239, 68, 68, 0.45)';
       }
-      return isDark ? 'rgba(16, 185, 129, 0.15)' : object.color || '#ead9cf';
+      return isDark ? 'rgba(16, 185, 129, 0.12)' : object.color || 'rgba(234, 217, 207, 0.4)';
     }
     if (object.type === 'exit') return isDark ? '#065f46' : '#2ea85f';
     if (object.type === 'door') return isDark ? '#4b5563' : '#d9a36b';
-    if (object.type === 'stairs') return isDark ? '#1e293b' : '#c7856c';
+    if (object.type === 'stairs') return isDark ? '#1e293b' : '#cbd5e1';
+    if (object.type === 'elevator') return isDark ? '#334155' : '#e2e8f0';
+    if (object.type === 'wall') return isDark ? '#475569' : '#64748b';
     if (object.type === 'mq2' || object.type === 'temp') {
       const isDanger = dangerDeviceIds.has(object.id);
       const isWarning = warningDeviceIds.has(object.id);
@@ -423,6 +536,14 @@ export function CanvasEditor(props: Props) {
     }
     return object.color || '#fff8f3';
   }
+
+  // Layering helper: floor_base at bottom, connector at top
+  const sortedObjects = useMemo(() => {
+    const bases = props.objects.filter((o) => o.type === 'floor_base');
+    const connectors = props.objects.filter((o) => o.type === 'connector');
+    const others = props.objects.filter((o) => o.type !== 'floor_base' && o.type !== 'connector');
+    return [...bases, ...others, ...connectors];
+  }, [props.objects]);
 
   function renderObject(object: FloorPlanObject) {
     if (object.visible === false || object.id === editingLabelId) return null;
@@ -446,10 +567,18 @@ export function CanvasEditor(props: Props) {
         if (isSpacePressed || event.evt.button === 1) return;
         event.cancelBubble = true;
         props.onSelect(object.id, event.evt.shiftKey);
+        const isPenTool = props.activeTool === 'room-pen' || props.activeTool === 'floor_base-pen';
+        if (isPenTool) {
+          props.onContextAction('select', '');
+        }
       },
       onTap: (event: Konva.KonvaEventObject<Event>) => {
         event.cancelBubble = true;
         props.onSelect(object.id, false);
+        const isPenTool = props.activeTool === 'room-pen' || props.activeTool === 'floor_base-pen';
+        if (isPenTool) {
+          props.onContextAction('select', '');
+        }
       },
       onDblClick: (e: any) => {
         if (!props.editMode) return;
@@ -516,32 +645,92 @@ export function CanvasEditor(props: Props) {
       },
     };
 
+    if (object.type === 'floor_base') {
+      const isPolygon = object.shapeType === 'polygon';
+      const pts = isPolygon ? object.points || [] : [0, 0, width, 0, width, height, 0, height];
+      return (
+        <Group {...commonProps}>
+          {/* clipped grid inside Floor Base boundary */}
+          <Group
+            clipFunc={(ctx) => {
+              if (pts.length < 4) return;
+              ctx.beginPath();
+              ctx.moveTo(pts[0], pts[1]);
+              for (let i = 2; i < pts.length; i += 2) {
+                ctx.lineTo(pts[i], pts[i + 1]);
+              }
+              ctx.closePath();
+            }}
+          >
+            <Rect
+              x={0}
+              y={0}
+              width={isPolygon ? 4000 : width}
+              height={isPolygon ? 4000 : height}
+              fill={objectFill(object)}
+            />
+          </Group>
+          {/* Custom outer frame stroke */}
+          <Line
+            points={pts}
+            closed={true}
+            stroke={selected ? '#3b82f6' : isDark ? '#334155' : '#cbd5e1'}
+            strokeWidth={selected ? 2.5 : 1.5}
+            shadowColor="rgba(0, 0, 0, 0.1)"
+            shadowBlur={selected ? 8 : 2}
+          />
+          <Text
+            text={object.name || 'Floor Base'}
+            x={pts[0] + 16}
+            y={pts[1] + 16}
+            fontSize={12}
+            fontStyle="bold"
+            fill={isDark ? '#475569' : '#94a3b8'}
+          />
+        </Group>
+      );
+    }
+
     if (object.type === 'room') {
       const roomStroke = isRoomDanger ? '#ef4444' : selected ? '#3b82f6' : isDark ? '#475569' : '#cbd5e1';
       return (
         <Group {...commonProps}>
-          <Rect
-            name={isRoomDanger ? "danger-blink" : undefined}
-            width={width}
-            height={height}
-            fill={objectFill(object)}
-            stroke={roomStroke}
-            cornerRadius={16}
-            strokeWidth={selected || isRoomDanger ? 3 : 1.5}
-            shadowColor={isRoomDanger ? '#ef4444' : selected ? '#3b82f6' : 'rgba(0, 0, 0, 0.04)'}
-            shadowBlur={selected || isRoomDanger ? 12 : 0}
-            shadowOpacity={0.6}
-          />
+          {object.shapeType === 'polygon' ? (
+            <Line
+              name={isRoomDanger ? "danger-blink" : undefined}
+              points={object.points || []}
+              closed={true}
+              fill={objectFill(object)}
+              stroke={roomStroke}
+              strokeWidth={selected || isRoomDanger ? 3 : 1.5}
+              shadowColor={isRoomDanger ? '#ef4444' : selected ? '#3b82f6' : 'rgba(0, 0, 0, 0.04)'}
+              shadowBlur={selected || isRoomDanger ? 12 : 0}
+              shadowOpacity={0.6}
+            />
+          ) : (
+            <Rect
+              name={isRoomDanger ? "danger-blink" : undefined}
+              width={width}
+              height={height}
+              fill={objectFill(object)}
+              stroke={roomStroke}
+              cornerRadius={16}
+              strokeWidth={selected || isRoomDanger ? 3 : 1.5}
+              shadowColor={isRoomDanger ? '#ef4444' : selected ? '#3b82f6' : 'rgba(0, 0, 0, 0.04)'}
+              shadowBlur={selected || isRoomDanger ? 12 : 0}
+              shadowOpacity={0.6}
+            />
+          )}
           <Text
             text={object.name || 'Room'}
-            x={16}
-            y={14}
+            x={object.shapeType === 'polygon' ? (object.points?.[0] || 0) + 16 : 16}
+            y={object.shapeType === 'polygon' ? (object.points?.[1] || 0) + 16 : 14}
             fontSize={15}
             fontStyle="bold"
             fill={isRoomDanger ? '#ef4444' : object.textColor || (isDark ? '#f8fafc' : '#334155')}
           />
           {isRoomDanger && (
-            <Group x={16} y={38}>
+            <Group x={object.shapeType === 'polygon' ? (object.points?.[0] || 0) + 16 : 16} y={object.shapeType === 'polygon' ? (object.points?.[1] || 0) + 38 : 38}>
               <Rect width={84} height={20} fill="#ef4444" cornerRadius={6} />
               <Text text="⚠️ DANGER" x={8} y={5} fontSize={10} fontStyle="bold" fill="#ffffff" />
             </Group>
@@ -609,13 +798,82 @@ export function CanvasEditor(props: Props) {
             cornerRadius={8}
           />
           <Text
-            text="Stairs 🪜"
+            text="🪜 Stairs"
             width={width}
             align="center"
             y={height / 2 - 6}
             fontSize={11}
             fontStyle="bold"
             fill={isDark ? '#94a3b8' : '#475569'}
+          />
+          {object.target_floor_id && (
+            <Text
+              text={`-> Floor ${object.target_floor_id}`}
+              width={width}
+              align="center"
+              y={height - 16}
+              fontSize={8}
+              fontStyle="bold"
+              fill={isDark ? '#38bdf8' : '#2563eb'}
+            />
+          )}
+        </Group>
+      );
+    }
+
+    if (object.type === 'elevator') {
+      return (
+        <Group {...commonProps}>
+          <Rect
+            width={width}
+            height={height}
+            fill={objectFill(object)}
+            stroke={selected ? '#3b82f6' : isDark ? '#475569' : '#cbd5e1'}
+            strokeWidth={1.5}
+            cornerRadius={8}
+          />
+          <Line
+            points={[width / 2, 4, width / 2, height - 4]}
+            stroke={isDark ? '#475569' : '#94a3b8'}
+            strokeWidth={1.5}
+          />
+          <Text
+            text="🛗 Lift"
+            width={width}
+            align="center"
+            y={height / 2 - 6}
+            fontSize={11}
+            fontStyle="bold"
+            fill={isDark ? '#cbd5e1' : '#475569'}
+          />
+          {object.target_floor_id && (
+            <Text
+              text={`-> Floor ${object.target_floor_id}`}
+              width={width}
+              align="center"
+              y={height - 16}
+              fontSize={8}
+              fontStyle="bold"
+              fill={isDark ? '#38bdf8' : '#2563eb'}
+            />
+          )}
+        </Group>
+      );
+    }
+
+    if (object.type === 'wall') {
+      return (
+        <Group {...commonProps}>
+          <Rect
+            width={width}
+            height={height}
+            fill={objectFill(object)}
+            stroke={selected ? '#3b82f6' : isDark ? '#1e293b' : '#cbd5e1'}
+            strokeWidth={selected ? 2 : 1}
+            cornerRadius={2}
+            shadowColor="black"
+            shadowBlur={selected ? 6 : 2}
+            shadowOpacity={0.25}
           />
         </Group>
       );
@@ -669,7 +927,6 @@ export function CanvasEditor(props: Props) {
             fontStyle="bold"
             fill={isDark ? '#cbd5e1' : '#475569'}
           />
-          {/* Live value badge (always display if sensor value is present) */}
           <Group x={-10} y={64}>
             <Rect
               width={64}
@@ -721,16 +978,27 @@ export function CanvasEditor(props: Props) {
       const toX = toNode.x + (toNode.width || toSize.width) / 2;
       const toY = toNode.y + (toNode.height || toSize.height) / 2;
 
+      // Realtime wall collision check
+      const intersectsWall = props.objects.some(
+        (obj) => obj.type === 'wall' && connectorIntersectsWall(fromNode, toNode, obj)
+      );
+
       return (
         <Group {...commonProps} x={0} y={0}>
           <Line
             points={[fromX, fromY, toX, toY]}
-            stroke={selected ? '#3b82f6' : isDark ? '#475569' : '#9ca3af'}
-            strokeWidth={selected ? 4 : 2}
-            dash={[5, 8]}
-            opacity={0.7}
+            stroke={intersectsWall ? '#f43f5e' : selected ? '#3b82f6' : isDark ? '#475569' : '#9ca3af'}
+            strokeWidth={selected ? 4 : intersectsWall ? 3.5 : 2}
+            dash={intersectsWall ? [5, 5] : [5, 8]}
+            opacity={intersectsWall ? 0.95 : 0.7}
             hitStrokeWidth={15}
           />
+          {intersectsWall && (
+            <Group x={(fromX + toX) / 2 - 8} y={(fromY + toY) / 2 - 8}>
+              <Circle radius={10} fill="#f43f5e" />
+              <Text text="⚠️" x={-6} y={-6} fontSize={10} fill="#ffffff" fontStyle="bold" />
+            </Group>
+          )}
         </Group>
       );
     }
@@ -815,93 +1083,178 @@ export function CanvasEditor(props: Props) {
         onMouseUp={handleMouseUp}
         onWheel={handleWheel}
       >
+        {/* Workspace Canvas (Drawing sheet background) */}
         <Layer>
-          <Rect
-            name="workspace-empty"
-            x={props.position.x}
-            y={props.position.y}
-            width={canvasWidth * props.scale}
-            height={canvasHeight * props.scale}
-            fill={isDark ? '#111827' : '#ffffff'}
-            stroke={isDark ? '#1e293b' : '#e2e8f0'}
-            cornerRadius={28}
-            shadowColor="rgba(0, 0, 0, 0.03)"
-            shadowBlur={16}
-            shadowOffset={{ x: 0, y: 4 }}
-          />
+          <Group x={props.position.x} y={props.position.y}>
+            <Rect
+              name="workspace-empty"
+              x={0}
+              y={0}
+              width={canvasWidth * props.scale}
+              height={canvasHeight * props.scale}
+              fill={isDark ? '#0f172a' : '#f8fafc'}
+              stroke={isDark ? '#1e293b' : '#cbd5e1'}
+              strokeWidth={1.5}
+              cornerRadius={8}
+              shadowColor="rgba(0, 0, 0, 0.08)"
+              shadowBlur={16}
+            />
+            {props.snapEnabled && gridPattern && (
+              <Rect
+                x={0}
+                y={0}
+                width={canvasWidth * props.scale}
+                height={canvasHeight * props.scale}
+                fillPatternImage={gridPattern as any}
+                fillPatternScaleX={props.scale}
+                fillPatternScaleY={props.scale}
+                fillPatternRepeat="repeat"
+                opacity={1.0}
+                listening={false}
+              />
+            )}
+          </Group>
         </Layer>
 
         <Layer>
           <Group x={props.position.x} y={props.position.y} scaleX={props.scale} scaleY={props.scale}>
-            {props.editMode && gridPattern && (
-              <Rect
-                name="workspace-grid"
-                x={0}
-                y={0}
-                width={canvasWidth}
-                height={canvasHeight}
-                fillPatternImage={gridPattern as any}
-                fillPatternRepeat="repeat"
-                listening={false}
-              />
+            
+            {/* Render floor plan objects (Base platform at the bottom) */}
+            {sortedObjects.map(renderObject)}
+
+            {/* Pen Tool drawing preview */}
+            {drawingState && mousePos && (
+              <Group x={drawingState.startX} y={drawingState.startY}>
+                <Line
+                  points={[
+                    ...drawingState.points,
+                    mousePos.x - drawingState.startX,
+                    mousePos.y - drawingState.startY,
+                  ]}
+                  stroke="#3b82f6"
+                  strokeWidth={2}
+                  dash={[4, 4]}
+                />
+                {drawingState.points.length >= 6 && Math.hypot(mousePos.x - drawingState.startX, mousePos.y - drawingState.startY) < 12 && (
+                  <Circle
+                    x={0}
+                    y={0}
+                    radius={8}
+                    fill="rgba(16, 185, 129, 0.5)"
+                    stroke="#10b981"
+                    strokeWidth={2}
+                  />
+                )}
+              </Group>
             )}
 
-            {/* Baseline Floor Below Rendering */}
-            {props.showBelowBaseline &&
-              props.belowObjects &&
-              props.belowObjects.map((obj) => {
-                if (obj.type !== 'room' && obj.type !== 'door' && obj.type !== 'exit' && obj.type !== 'stairs')
-                  return null;
-                const w = obj.width || getDefaultSize(obj.type).width;
-                const h = obj.height || getDefaultSize(obj.type).height;
+            {/* Polygon vertex editing handles */}
+            {props.editMode && selectedObjects.length === 1 && selectedObjects[0].shapeType === 'polygon' && (
+              <Group x={selectedObjects[0].x} y={selectedObjects[0].y}>
+                {(() => {
+                  const targetObj = selectedObjects[0];
+                  const pts = targetObj.points || [];
+                  const handles: JSX.Element[] = [];
 
-                const commonProps = {
-                  key: `below-${obj.id}`,
-                  x: obj.x,
-                  y: obj.y,
-                  rotation: obj.rotation || 0,
-                  listening: false,
-                };
+                  for (let i = 0; i < pts.length; i += 2) {
+                    const idx = i;
+                    const vx = pts[idx];
+                    const vy = pts[idx + 1];
 
-                if (obj.type === 'room') {
-                  return (
-                    <Group {...commonProps}>
-                      <Rect
-                        width={w}
-                        height={h}
-                        stroke={isDark ? 'rgba(148, 163, 184, 0.25)' : 'rgba(148, 163, 184, 0.45)'}
+                    // 1. Vertex Handle (blue circles)
+                    handles.push(
+                      <Circle
+                        key={`v-${idx}`}
+                        x={vx}
+                        y={vy}
+                        radius={7}
+                        fill="#3b82f6"
+                        stroke="#ffffff"
+                        strokeWidth={2}
+                        draggable
+                        onDragMove={(e) => {
+                          const newVx = e.target.x();
+                          const newVy = e.target.y();
+                          const nextPoints = [...pts];
+                          nextPoints[idx] = newVx;
+                          nextPoints[idx + 1] = newVy;
+                          props.onUpdateObject(targetObj.id, { points: nextPoints });
+                        }}
+                        onDragEnd={(e) => {
+                          const newVx = e.target.x();
+                          const newVy = e.target.y();
+                          let nextPoints = [...pts];
+                          nextPoints[idx] = newVx;
+                          nextPoints[idx + 1] = newVy;
+
+                          const prevIdx = (idx - 2 + pts.length) % pts.length;
+                          const nextIdx = (idx + 2) % pts.length;
+
+                          const distPrev = Math.hypot(newVx - pts[prevIdx], newVy - pts[prevIdx + 1]);
+                          const distNext = Math.hypot(newVx - pts[nextIdx], newVy - pts[nextIdx + 1]);
+
+                          // Overlap with adjacent vertices deletes the vertex
+                          if (distPrev < 15 || distNext < 15) {
+                            nextPoints.splice(idx, 2);
+                            if (nextPoints.length < 6) {
+                              props.onContextAction('delete', targetObj.id);
+                              return;
+                            }
+                          }
+
+                          props.onUpdateObject(targetObj.id, { points: nextPoints });
+                        }}
+                        onMouseEnter={(e) => {
+                          const stage = e.target.getStage();
+                          if (stage) stage.container().style.cursor = 'move';
+                        }}
+                        onMouseLeave={(e) => {
+                          const stage = e.target.getStage();
+                          if (stage) stage.container().style.cursor = 'default';
+                        }}
+                      />
+                    );
+
+                    // 2. Midpoint Handle (green circles) - splits segment into new vertex
+                    const nextIdx = (idx + 2) % pts.length;
+                    const nvx = pts[nextIdx];
+                    const nvy = pts[nextIdx + 1];
+                    const mx = (vx + nvx) / 2;
+                    const my = (vy + nvy) / 2;
+
+                    handles.push(
+                      <Circle
+                        key={`m-${idx}`}
+                        x={mx}
+                        y={my}
+                        radius={5}
+                        fill="#10b981"
+                        stroke="#ffffff"
                         strokeWidth={1.5}
-                        dash={[4, 6]}
-                        cornerRadius={16}
+                        opacity={0.8}
+                        draggable
+                        onDragEnd={(e) => {
+                          const newMx = e.target.x();
+                          const newMy = e.target.y();
+                          const nextPoints = [...pts];
+                          nextPoints.splice(idx + 2, 0, newMx, newMy);
+                          props.onUpdateObject(targetObj.id, { points: nextPoints });
+                        }}
+                        onMouseEnter={(e) => {
+                          const stage = e.target.getStage();
+                          if (stage) stage.container().style.cursor = 'pointer';
+                        }}
+                        onMouseLeave={(e) => {
+                          const stage = e.target.getStage();
+                          if (stage) stage.container().style.cursor = 'default';
+                        }}
                       />
-                      <Text
-                        text={`${obj.name || 'Room'} (Tầng dưới)`}
-                        x={16}
-                        y={14}
-                        fontSize={11}
-                        fontStyle="italic"
-                        fill={isDark ? 'rgba(148, 163, 184, 0.4)' : 'rgba(148, 163, 184, 0.65)'}
-                      />
-                    </Group>
-                  );
-                }
-
-                return (
-                  <Group {...commonProps}>
-                    <Rect
-                      width={w}
-                      height={h}
-                      stroke={isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.35)'}
-                      strokeWidth={1.2}
-                      dash={[3, 5]}
-                      cornerRadius={8}
-                    />
-                  </Group>
-                );
-              })}
-
-            {/* Render Active Plan Objects */}
-            {props.objects.map(renderObject)}
+                    );
+                  }
+                  return handles;
+                })()}
+              </Group>
+            )}
 
             {/* Safe Escape Route Glowing Flow Arrow Line */}
             {safePathPoints && (
@@ -950,7 +1303,18 @@ export function CanvasEditor(props: Props) {
                 anchorStroke="#3b82f6"
                 anchorFill={isDark ? '#1e293b' : '#ffffff'}
                 enabledAnchors={
-                  resizeEnabled ? ['top-left', 'top-right', 'bottom-left', 'bottom-right'] : []
+                  resizeEnabled
+                    ? [
+                        'top-left',
+                        'top-center',
+                        'top-right',
+                        'middle-right',
+                        'bottom-right',
+                        'bottom-center',
+                        'bottom-left',
+                        'middle-left',
+                      ]
+                    : []
                 }
                 boundBoxFunc={(oldBox, newBox) =>
                   newBox.width < 14 || newBox.height < 14 ? oldBox : newBox
@@ -958,7 +1322,7 @@ export function CanvasEditor(props: Props) {
               />
             )}
 
-            {/* Edge and Corner Resizers */}
+            {/* Edge and Corner Resizers for base drawing canvas sheet */}
             {props.editMode && props.selectedIds.length === 0 && (
               <Group>
                 {/* Left Edge Resizer */}
@@ -993,7 +1357,7 @@ export function CanvasEditor(props: Props) {
                     if (stage) stage.container().style.cursor = 'ew-resize';
                   }}
                   onMouseLeave={(e) => {
-                    setHoveredEdge(null);
+                    setHoveredEdge('left');
                     const stage = e.target.getStage();
                     if (stage) stage.container().style.cursor = 'default';
                   }}
@@ -1234,7 +1598,7 @@ export function CanvasEditor(props: Props) {
         >
           -
         </button>
-        <span className={`h-4 w-px ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`} />
+        <span className={`h-4 w-px ${isDark ? 'bg-slate-805' : 'bg-slate-200'}`} />
         <button
           onClick={props.onFit}
           className={clsx(
@@ -1254,7 +1618,6 @@ export function CanvasEditor(props: Props) {
           100%
         </button>
       </div>
-
 
       {props.editMode && selectedObjects.length > 0 && (
         <div
@@ -1365,7 +1728,6 @@ export function CanvasEditor(props: Props) {
             borderRadius: '6px',
             padding: '2px',
             outline: 'none',
-            resize: 'none',
             zIndex: 100,
             fontFamily: "'Inter', sans-serif",
             fontWeight: 'bold',

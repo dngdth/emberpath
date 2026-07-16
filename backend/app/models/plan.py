@@ -14,6 +14,7 @@ class FloorPlan(Base):
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     canvas_width: Mapped[float] = mapped_column(Float, default=1600.0, nullable=False)
     canvas_height: Mapped[float] = mapped_column(Float, default=1000.0, nullable=False)
+    canvas_shape: Mapped[str | None] = mapped_column(String(40), default="rect", nullable=True)
 
     floor = relationship("Floor", back_populates="plan")
     objects = relationship("PlanObject", back_populates="plan", cascade="all, delete-orphan")
@@ -40,5 +41,7 @@ class PlanObject(Base):
     node_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
     locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     visible: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    shape_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    target_floor_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     plan = relationship("FloorPlan", back_populates="objects")

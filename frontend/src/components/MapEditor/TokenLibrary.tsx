@@ -8,7 +8,7 @@ export function TokenLibrary({
   onSelect,
 }: {
   activeTool: string;
-  onSelect: (type: ObjectType | 'select') => void;
+  onSelect: (type: string) => void;
 }) {
   const { darkMode } = useThemeStore();
   const isDark = darkMode;

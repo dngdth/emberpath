@@ -18,6 +18,9 @@ class PlanObjectIn(BaseModel):
     visible: bool = True
     fromNodeId: str | None = None
     toNodeId: str | None = None
+    shapeType: str | None = None
+    target_floor_id: int | None = None
+    points: list[float] | None = None
 
 class FloorResponse(BaseModel):
     id: int
@@ -33,12 +36,14 @@ class FloorPlanResponse(BaseModel):
     version: int
     canvas_width: float = 1600.0
     canvas_height: float = 1000.0
+    canvas_shape: str | None = "rect"
 
 
 class FloorPlanSaveRequest(BaseModel):
     objects: list[PlanObjectIn] = Field(default_factory=list)
     canvas_width: float = 1600.0
     canvas_height: float = 1000.0
+    canvas_shape: str | None = "rect"
 
 
 class FloorCreateRequest(BaseModel):

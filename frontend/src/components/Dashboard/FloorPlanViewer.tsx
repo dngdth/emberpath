@@ -4,7 +4,7 @@ import { Circle, Group, Layer, Line, Rect, Stage, Text } from 'react-konva';
 import { ZoomIn, ZoomOut, Maximize, RefreshCw, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { FloorPlanObject } from '../../types/editor';
 import { SensorDevice } from '../../types/sensor';
-import { getDefaultSize } from '../../utils/geometryHelpers';
+import { getDefaultSize, isPointInPolygon } from '../../utils/geometryHelpers';
 
 interface Props {
   objects: FloorPlanObject[];
@@ -43,6 +43,26 @@ export function FloorPlanViewer({
   const [panOrigin, setPanOrigin] = useState({ x: 0, y: 0 });
 
   const safePathLineRef = useRef<Konva.Line | null>(null);
+
+  const gridPattern = useMemo(() => {
+    if (typeof window === 'undefined') return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = 24;
+    canvas.height = 24;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.strokeStyle = isDark ? 'rgba(100, 116, 139, 0.4)' : 'rgba(148, 163, 184, 0.25)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(24, 0);
+    ctx.lineTo(24, 24);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, 24);
+    ctx.lineTo(24, 24);
+    ctx.stroke();
+    return canvas;
+  }, [isDark]);
 
   // Handle auto viewport resizing with throttling to smooth out layout transitions
   useEffect(() => {
@@ -100,12 +120,12 @@ export function FloorPlanViewer({
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     objects.forEach(obj => {
       if (obj.type === 'connector' || obj.type === 'label') return;
-      const w = obj.width || 40;
-      const h = obj.height || 40;
+      const oW = obj.width || 40;
+      const oH = obj.height || 40;
       minX = Math.min(minX, obj.x);
       minY = Math.min(minY, obj.y);
-      maxX = Math.max(maxX, obj.x + w);
-      maxY = Math.max(maxY, obj.y + h);
+      maxX = Math.max(maxX, obj.x + oW);
+      maxY = Math.max(maxY, obj.y + oH);
     });
 
     if (minX === Infinity) {
@@ -238,16 +258,30 @@ export function FloorPlanViewer({
 
     objects.forEach((obj) => {
       if (obj.type === 'room') {
-        const rx = obj.x;
-        const ry = obj.y;
-        const rw = obj.width || 200;
-        const rh = obj.height || 120;
-        
-        const hasDanger = dangerPositions.some(
-          (p) => p.x >= rx && p.x <= rx + rw && p.y >= ry && p.y <= ry + rh
-        );
-        if (hasDanger) {
-          rooms.add(obj.id);
+        const isPolygon = obj.shapeType === 'polygon';
+        const pts = obj.points;
+
+        if (isPolygon && pts && pts.length >= 6) {
+          const poly = [];
+          for (let i = 0; i < pts.length; i += 2) {
+            poly.push({ x: obj.x + pts[i], y: obj.y + pts[i + 1] });
+          }
+          const hasDanger = dangerPositions.some((p) => isPointInPolygon(p.x, p.y, poly));
+          if (hasDanger) {
+            rooms.add(obj.id);
+          }
+        } else {
+          const rx = obj.x;
+          const ry = obj.y;
+          const rw = obj.width || 240;
+          const rh = obj.height || 140;
+          
+          const hasDanger = dangerPositions.some(
+            (p) => p.x >= rx && p.x <= rx + rw && p.y >= ry && p.y <= ry + rh
+          );
+          if (hasDanger) {
+            rooms.add(obj.id);
+          }
         }
       }
     });
@@ -295,7 +329,6 @@ export function FloorPlanViewer({
       };
     }
 
-    // Default room styles depending on name/theme
     const isLobby = room.name?.toLowerCase().includes('lobby');
     if (isLobby) {
       return {
@@ -308,7 +341,7 @@ export function FloorPlanViewer({
     }
 
     return {
-      fill: isDark ? 'rgba(16, 185, 129, 0.15)' : 'rgba(16, 185, 129, 0.08)',
+      fill: isDark ? 'rgba(16, 185, 129, 0.12)' : 'rgba(16, 185, 129, 0.05)',
       stroke: isDark ? '#10B981' : '#10b981',
       strokeWidth: 1.5,
       shadowBlur: 0,
@@ -316,11 +349,19 @@ export function FloorPlanViewer({
     };
   };
 
+  // Layering order: floor_base first, then others, then connectors
+  const sortedObjects = useMemo(() => {
+    const bases = objects.filter((o) => o.type === 'floor_base');
+    const connectors = objects.filter((o) => o.type === 'connector');
+    const others = objects.filter((o) => o.type !== 'floor_base' && o.type !== 'connector');
+    return [...bases, ...others, ...connectors];
+  }, [objects]);
+
   // Render objects on Konva layer
   const renderObject = (obj: FloorPlanObject) => {
     if (obj.visible === false) return null;
-    const w = obj.width || getDefaultSize(obj.type).width;
-    const h = obj.height || getDefaultSize(obj.type).height;
+    const oW = obj.width || getDefaultSize(obj.type).width;
+    const oH = obj.height || getDefaultSize(obj.type).height;
 
     const commonProps = {
       key: obj.id,
@@ -339,29 +380,80 @@ export function FloorPlanViewer({
       },
     };
 
+    if (obj.type === 'floor_base') {
+      const isPolygon = obj.shapeType === 'polygon';
+      const pts = isPolygon ? obj.points || [] : [0, 0, oW, 0, oW, oH, 0, oH];
+      return (
+        <Group {...commonProps}>
+          <Group
+            clipFunc={(ctx) => {
+              if (pts.length < 4) return;
+              ctx.beginPath();
+              ctx.moveTo(pts[0], pts[1]);
+              for (let i = 2; i < pts.length; i += 2) {
+                ctx.lineTo(pts[i], pts[i + 1]);
+              }
+              ctx.closePath();
+            }}
+          >
+            <Rect
+              x={0}
+              y={0}
+              width={isPolygon ? 4000 : oW}
+              height={isPolygon ? 4000 : oH}
+              fill={isDark ? 'rgba(30, 41, 59, 0.6)' : 'rgba(203, 213, 225, 0.5)'}
+            />
+          </Group>
+          <Line
+            points={pts}
+            closed={true}
+            stroke={isDark ? '#334155' : '#cbd5e1'}
+            strokeWidth={2}
+            listening={false}
+          />
+        </Group>
+      );
+    }
+
     if (obj.type === 'room') {
       const style = getRoomStyle(obj);
       const isDanger = dangerRooms.has(obj.id);
+      const isPolygon = obj.shapeType === 'polygon';
+      const pts = obj.points || [];
 
       return (
         <Group {...commonProps}>
-          <Rect
-            name={isDanger ? "danger-blink" : undefined}
-            width={w}
-            height={h}
-            fill={style.fill}
-            stroke={style.stroke}
-            strokeWidth={style.strokeWidth}
-            cornerRadius={16}
-            shadowColor={style.shadowColor}
-            shadowBlur={style.shadowBlur}
-            shadowOpacity={0.6}
-          />
+          {isPolygon && pts.length >= 6 ? (
+            <Line
+              name={isDanger ? "danger-blink" : undefined}
+              points={pts}
+              closed={true}
+              fill={style.fill}
+              stroke={style.stroke}
+              strokeWidth={style.strokeWidth}
+              shadowColor={style.shadowColor}
+              shadowBlur={style.shadowBlur}
+              shadowOpacity={0.6}
+            />
+          ) : (
+            <Rect
+              name={isDanger ? "danger-blink" : undefined}
+              width={oW}
+              height={oH}
+              fill={style.fill}
+              stroke={style.stroke}
+              strokeWidth={style.strokeWidth}
+              cornerRadius={16}
+              shadowColor={style.shadowColor}
+              shadowBlur={style.shadowBlur}
+              shadowOpacity={0.6}
+            />
+          )}
           {/* Room Name */}
           <Text
             text={obj.name || 'Room'}
-            x={16}
-            y={14}
+            x={isPolygon ? pts[0] + 16 : 16}
+            y={isPolygon ? pts[1] + 16 : 14}
             fontSize={15}
             fontStyle="bold"
             fill={isDanger ? '#ef4444' : isDark ? '#f8fafc' : '#334155'}
@@ -369,7 +461,7 @@ export function FloorPlanViewer({
 
           {/* Pulsing Danger Badge */}
           {isDanger && (
-            <Group x={16} y={36}>
+            <Group x={isPolygon ? pts[0] + 16 : 16} y={isPolygon ? pts[1] + 38 : 36}>
               <Rect
                 width={80}
                 height={20}
@@ -394,9 +486,9 @@ export function FloorPlanViewer({
       return (
         <Group {...commonProps}>
           <Rect
-            width={w}
-            height={h}
-            fill={isDark ? '#4b5563' : '#94a3b8'}
+            width={oW}
+            height={oH}
+            fill={isDark ? '#4b5563' : '#d9a36b'}
             cornerRadius={4}
           />
         </Group>
@@ -407,8 +499,8 @@ export function FloorPlanViewer({
       return (
         <Group {...commonProps}>
           <Rect
-            width={w}
-            height={h}
+            width={oW}
+            height={oH}
             fill={isDark ? '#065f46' : '#10b981'}
             stroke="#10b981"
             strokeWidth={1.5}
@@ -416,9 +508,9 @@ export function FloorPlanViewer({
           />
           <Text
             text={obj.name || 'EXIT'}
-            width={w}
+            width={oW}
             align="center"
-            y={h / 2 - 7}
+            y={oH / 2 - 7}
             fontStyle="bold"
             fontSize={13}
             fill="#ffffff"
@@ -431,22 +523,66 @@ export function FloorPlanViewer({
       return (
         <Group {...commonProps}>
           <Rect
-            width={w}
-            height={h}
-            stroke={isDark ? '#475569' : '#94a3b8'}
+            width={oW}
+            height={oH}
+            stroke={isDark ? '#475569' : '#cbd5e1'}
             strokeWidth={1.5}
             dash={[6, 4]}
             cornerRadius={8}
-            fill={isDark ? '#1e293b' : '#f8fafc'}
+            fill={isDark ? '#1e293b' : '#cbd5e1'}
           />
           <Text
-            text="Stairs 🪜"
-            width={w}
+            text="🪜 Stairs"
+            width={oW}
             align="center"
-            y={h / 2 - 7}
+            y={oH / 2 - 7}
             fontSize={12}
             fontStyle="bold"
-            fill={isDark ? '#94a3b8' : '#475569'}
+            fill={isDark ? '#cbd5e1' : '#475569'}
+          />
+        </Group>
+      );
+    }
+
+    if (obj.type === 'elevator') {
+      return (
+        <Group {...commonProps}>
+          <Rect
+            width={oW}
+            height={oH}
+            fill={isDark ? '#334155' : '#e2e8f0'}
+            stroke={isDark ? '#475569' : '#cbd5e1'}
+            strokeWidth={1.5}
+            cornerRadius={8}
+          />
+          <Line
+            points={[oW / 2, 4, oW / 2, oH - 4]}
+            stroke={isDark ? '#475569' : '#94a3b8'}
+            strokeWidth={1.5}
+          />
+          <Text
+            text="🛗 Lift"
+            width={oW}
+            align="center"
+            y={oH / 2 - 7}
+            fontSize={11}
+            fontStyle="bold"
+            fill={isDark ? '#cbd5e1' : '#475569'}
+          />
+        </Group>
+      );
+    }
+
+    if (obj.type === 'wall') {
+      return (
+        <Group {...commonProps}>
+          <Rect
+            width={oW}
+            height={oH}
+            fill={isDark ? '#475569' : '#64748b'}
+            stroke={isDark ? '#1e293b' : '#475569'}
+            strokeWidth={1}
+            cornerRadius={2}
           />
         </Group>
       );
@@ -487,14 +623,12 @@ export function FloorPlanViewer({
             shadowColor={isDanger ? '#ef4444' : ''}
             shadowBlur={isDanger ? 10 : 0}
           />
-          {/* Sensor Symbol Icon text */}
           <Text
             text={obj.type === 'mq2' ? '💨' : '🌡️'}
             x={13}
             y={13}
             fontSize={16}
           />
-          {/* Label under it */}
           <Text
             text={label}
             x={-15}
@@ -505,7 +639,6 @@ export function FloorPlanViewer({
             fontStyle="bold"
             fill={isDark ? '#cbd5e1' : '#475569'}
           />
-          {/* Value badge */}
           <Group x={-10} y={64}>
             <Rect
               width={64}
@@ -571,7 +704,6 @@ export function FloorPlanViewer({
       );
     }
 
-    // Default label / text rendering
     return (
       <Group {...commonProps}>
         <Text
@@ -652,19 +784,35 @@ export function FloorPlanViewer({
         onMouseUp={handleMouseUp}
         onWheel={handleWheel}
       >
-        {/* Workspace Canvas Board */}
+        {/* Workspace Canvas Board (Drawing sheet background) */}
         <Layer>
-          <Rect
-            name="workspace-empty"
-            x={position.x}
-            y={position.y}
-            width={w * scale}
-            height={h * scale}
-            fill={isDark ? '#111827' : '#ffffff'}
-            stroke={isDark ? '#1e293b' : '#e2e8f0'}
-            strokeWidth={1}
-            cornerRadius={20}
-          />
+          <Group x={position.x} y={position.y}>
+            <Rect
+              name="workspace-empty"
+              x={0}
+              y={0}
+              width={w * scale}
+              height={h * scale}
+              fill={isDark ? '#0f172a' : '#f8fafc'}
+              stroke={isDark ? '#1e293b' : '#cbd5e1'}
+              strokeWidth={1.5}
+              cornerRadius={8}
+            />
+            {gridPattern && (
+              <Rect
+                x={0}
+                y={0}
+                width={w * scale}
+                height={h * scale}
+                fillPatternImage={gridPattern as any}
+                fillPatternScaleX={scale}
+                fillPatternScaleY={scale}
+                fillPatternRepeat="repeat"
+                opacity={1.0}
+                listening={false}
+              />
+            )}
+          </Group>
         </Layer>
 
         {/* Dynamic Floor Plan layer */}
@@ -675,8 +823,8 @@ export function FloorPlanViewer({
             scaleX={scale}
             scaleY={scale}
           >
-            {/* Render all structural objects */}
-            {objects.map(renderObject)}
+            {/* Render all structural objects (Layered bases first) */}
+            {sortedObjects.map(renderObject)}
 
             {/* Evacuation Flow Route (High Fidelity Green Glowing Arrow Path) */}
             {safePathPoints && (
@@ -760,3 +908,4 @@ export function FloorPlanViewer({
     </div>
   );
 }
+export default FloorPlanViewer;

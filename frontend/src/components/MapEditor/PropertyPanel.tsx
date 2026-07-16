@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FloorPlanObject } from '../../types/editor';
+import { FloorPlanObject, FloorItem } from '../../types/editor';
 import { useThemeStore } from '../../store/themeStore';
+import { getDefaultSize } from '../../utils/geometryHelpers';
 import api from '../../utils/api';
 import clsx from 'clsx';
 import { ToggleLeft, ToggleRight, Radio, Shield, Settings, Compass, Palette } from 'lucide-react';
@@ -11,6 +12,7 @@ type Props = {
   canvasWidth?: number;
   canvasHeight?: number;
   onCanvasSizeChange?: (width: number, height: number) => void;
+  floors?: FloorItem[];
 };
 
 interface DebouncedInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange'> {
@@ -66,7 +68,14 @@ function updateNumber(
   }
 }
 
-export function PropertyPanel({ object, onChange, canvasWidth, canvasHeight, onCanvasSizeChange }: Props) {
+export function PropertyPanel({
+  object,
+  onChange,
+  canvasWidth,
+  canvasHeight,
+  onCanvasSizeChange,
+  floors,
+}: Props) {
   const { darkMode } = useThemeStore();
   const isDark = darkMode;
 
@@ -91,7 +100,6 @@ export function PropertyPanel({ object, onChange, canvasWidth, canvasHeight, onC
   }, [object?.type]);
 
   const labelClass = isDark ? 'text-slate-450' : 'text-slate-500';
-  const sectionTitleClass = isDark ? 'text-blue-400' : 'text-blue-600';
   
   const disabledInputClass = isDark
     ? 'h-9 w-full rounded-xl border border-slate-800 bg-slate-900 px-3 text-xs text-slate-500 cursor-not-allowed'
@@ -118,38 +126,40 @@ export function PropertyPanel({ object, onChange, canvasWidth, canvasHeight, onC
           <div className={`rounded-2xl border p-3 space-y-2.5 transition-colors duration-300 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
             <div className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-blue-500">
               <Compass size={12} />
-              <span>Kích thước bản vẽ</span>
+              <span>Kích thước Trang thiết kế</span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <div>
-                <label className={clsx('mb-0.5 block text-[10px]', labelClass)}>Chiều rộng (px)</label>
-                <DebouncedInput
-                  type="number"
-                  value={canvasWidth ?? 1600}
-                  onChange={(val) => {
-                    const w = Math.max(400, Math.min(10000, Number(val) || 1600));
-                    onCanvasSizeChange?.(w, canvasHeight ?? 1000);
-                  }}
-                  className={inputClass}
-                />
-              </div>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className={clsx('mb-0.5 block text-[10px]', labelClass)}>Chiều rộng (px)</label>
+                  <DebouncedInput
+                    type="number"
+                    value={canvasWidth ?? 1600}
+                    onChange={(val) => {
+                      const w = Math.max(400, Math.min(10000, Number(val) || 1600));
+                      onCanvasSizeChange?.(w, canvasHeight ?? 1000);
+                    }}
+                    className={inputClass}
+                  />
+                </div>
 
-              <div>
-                <label className={clsx('mb-0.5 block text-[10px]', labelClass)}>Chiều cao (px)</label>
-                <DebouncedInput
-                  type="number"
-                  value={canvasHeight ?? 1000}
-                  onChange={(val) => {
-                    const h = Math.max(400, Math.min(10000, Number(val) || 1000));
-                    onCanvasSizeChange?.(canvasWidth ?? 1600, h);
-                  }}
-                  className={inputClass}
-                />
+                <div>
+                  <label className={clsx('mb-0.5 block text-[10px]', labelClass)}>Chiều cao (px)</label>
+                  <DebouncedInput
+                    type="number"
+                    value={canvasHeight ?? 1000}
+                    onChange={(val) => {
+                      const h = Math.max(400, Math.min(10000, Number(val) || 1000));
+                      onCanvasSizeChange?.(canvasWidth ?? 1600, h);
+                    }}
+                    className={inputClass}
+                  />
+                </div>
               </div>
             </div>
             <p className="text-[9px] opacity-60 mt-1 leading-relaxed">
-              Thay đổi kích thước vùng vẽ màu trắng. Khuyên dùng từ 800px đến 4000px.
+              Kích thước của trang giấy thiết kế (Canvas). Bấm chọn các đối tượng như Nền tầng (Floor Base) hay Phòng để tùy biến hình dạng/tọa độ của chúng.
             </p>
           </div>
         </div>
@@ -167,8 +177,8 @@ export function PropertyPanel({ object, onChange, canvasWidth, canvasHeight, onC
   const isLed = object.type === 'led';
   const isLabel = object.type === 'label';
   const isSensor = object.type === 'mq2' || object.type === 'temp';
-  const showSize = object.type !== 'led' && object.type !== 'exit';
-  const showText = object.type === 'room' || object.type === 'label' || object.type === 'exit';
+  const showSize = object.type !== 'connector';
+  const showText = object.type === 'room' || object.type === 'label' || object.type === 'exit' || object.type === 'floor_base';
 
   return (
     <div className={`space-y-4 text-xs ${isDark ? 'text-slate-350' : 'text-slate-700'}`}>
@@ -287,6 +297,57 @@ export function PropertyPanel({ object, onChange, canvasWidth, canvasHeight, onC
                 />
               </div>
             </>
+          )}
+
+          {/* Room / Floor Base shape selector */}
+          {(object.type === 'room' || object.type === 'floor_base') && (
+            <div className="col-span-2">
+              <label className={clsx('mb-0.5 block text-[10px] font-bold', labelClass)}>Hình dạng đối tượng</label>
+              <select
+                value={object.shapeType || 'rect'}
+                onChange={(e) => {
+                  const nextShape = e.target.value as 'rect' | 'polygon';
+                  const size = getDefaultSize(object.type);
+                  const nextPatch: Partial<FloorPlanObject> = { shapeType: nextShape };
+                  if (nextShape === 'polygon') {
+                    nextPatch.points = [
+                      size.width * 0.25, 0,
+                      size.width * 0.75, 0,
+                      size.width, size.height * 0.5,
+                      size.width * 0.75, size.height,
+                      size.width * 0.25, size.height,
+                      0, size.height * 0.5
+                    ];
+                  } else {
+                    nextPatch.points = undefined;
+                  }
+                  onChange(nextPatch);
+                }}
+                className={inputClass}
+              >
+                <option value="rect">⏹️ Hình chữ nhật (Rect)</option>
+                <option value="polygon">⬡ Hình đa giác (Polygon)</option>
+              </select>
+            </div>
+          )}
+
+          {/* Stairs / Elevator target floor linking */}
+          {(object.type === 'stairs' || object.type === 'elevator') && (
+            <div className="col-span-2">
+              <label className={clsx('mb-0.5 block text-[10px] font-bold', labelClass)}>Tầng liên kết đích</label>
+              <select
+                value={object.target_floor_id || ''}
+                onChange={(e) => onChange({ target_floor_id: e.target.value ? Number(e.target.value) : undefined })}
+                className={inputClass}
+              >
+                <option value="">-- Không liên kết --</option>
+                {floors?.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           )}
         </div>
       </div>

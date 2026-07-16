@@ -4,12 +4,12 @@ import { createNewObject } from '../data/initialMockData';
 import { snapPosition } from '../utils/snapHelpers';
 
 export function useEditorState(objects: FloorPlanObject[], setObjects: (next: FloorPlanObject[]) => void) {
-  const [activeTool, setActiveTool] = useState<'select' | FloorPlanObject['type']>('select');
+  const [activeTool, setActiveTool] = useState<string>('select');
   const [clipboard, setClipboard] = useState<FloorPlanObject[]>([]);
   const [snapEnabled, setSnapEnabled] = useState(true);
 
 
-  function addObject(type: FloorPlanObject['type'], x: number, y: number) {
+  function addObject(type: any, x: number, y: number) {
     const snapped = snapPosition(x, y, snapEnabled);
     setObjects([...objects, createNewObject(type, snapped.x, snapped.y)]);
     // setActiveTool('select');

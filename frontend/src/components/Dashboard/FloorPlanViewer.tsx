@@ -5,6 +5,7 @@ import { ZoomIn, ZoomOut, Maximize, RefreshCw, AlertTriangle, ShieldCheck } from
 import { FloorPlanObject } from '../../types/editor';
 import { SensorDevice } from '../../types/sensor';
 import { getDefaultSize, isPointInPolygon } from '../../utils/geometryHelpers';
+import { StairsSymbol } from '../MapEditor/StairsSymbol';
 
 interface Props {
   objects: FloorPlanObject[];
@@ -262,7 +263,7 @@ export function FloorPlanViewer({
         const pts = obj.points;
 
         if (isPolygon && pts && pts.length >= 6) {
-          const poly = [];
+          const poly: { x: number; y: number }[] = [];
           for (let i = 0; i < pts.length; i += 2) {
             poly.push({ x: obj.x + pts[i], y: obj.y + pts[i + 1] });
           }
@@ -501,7 +502,7 @@ export function FloorPlanViewer({
           <Rect
             width={oW}
             height={oH}
-            fill={isDark ? '#065f46' : '#10b981'}
+            fill="#10b981"
             stroke="#10b981"
             strokeWidth={1.5}
             cornerRadius={8}
@@ -520,26 +521,18 @@ export function FloorPlanViewer({
     }
 
     if (obj.type === 'stairs') {
+      const stairStrokeColor = '#475569';
       return (
         <Group {...commonProps}>
           <Rect
             width={oW}
             height={oH}
-            stroke={isDark ? '#475569' : '#cbd5e1'}
+            stroke={stairStrokeColor}
             strokeWidth={1.5}
-            dash={[6, 4]}
             cornerRadius={8}
-            fill={isDark ? '#1e293b' : '#cbd5e1'}
+            fill={obj.color || '#cbd5e1'}
           />
-          <Text
-            text="🪜 Stairs"
-            width={oW}
-            align="center"
-            y={oH / 2 - 7}
-            fontSize={12}
-            fontStyle="bold"
-            fill={isDark ? '#cbd5e1' : '#475569'}
-          />
+          <StairsSymbol width={oW} height={oH} strokeColor={stairStrokeColor} strokeWidth={1.5} isDashed={false} />
         </Group>
       );
     }
@@ -550,14 +543,14 @@ export function FloorPlanViewer({
           <Rect
             width={oW}
             height={oH}
-            fill={isDark ? '#334155' : '#e2e8f0'}
-            stroke={isDark ? '#475569' : '#cbd5e1'}
+            fill="#e2e8f0"
+            stroke="#cbd5e1"
             strokeWidth={1.5}
             cornerRadius={8}
           />
           <Line
             points={[oW / 2, 4, oW / 2, oH - 4]}
-            stroke={isDark ? '#475569' : '#94a3b8'}
+            stroke="#94a3b8"
             strokeWidth={1.5}
           />
           <Text
@@ -567,7 +560,7 @@ export function FloorPlanViewer({
             y={oH / 2 - 7}
             fontSize={11}
             fontStyle="bold"
-            fill={isDark ? '#cbd5e1' : '#475569'}
+            fill="#475569"
           />
         </Group>
       );
@@ -579,8 +572,8 @@ export function FloorPlanViewer({
           <Rect
             width={oW}
             height={oH}
-            fill={isDark ? '#475569' : '#64748b'}
-            stroke={isDark ? '#1e293b' : '#475569'}
+            fill="#64748b"
+            stroke="#cbd5e1"
             strokeWidth={1}
             cornerRadius={2}
           />
@@ -592,9 +585,9 @@ export function FloorPlanViewer({
       const isDanger = dangerDeviceIds.has(obj.id);
       const isWarning = warningDeviceIds.has(obj.id);
       
-      let badgeColor = isDark ? '#334155' : '#f1f5f9';
-      let strokeColor = isDark ? '#475569' : '#cbd5e1';
-      let textColor = isDark ? '#f8fafc' : '#475569';
+      let badgeColor = '#f1f5f9';
+      let strokeColor = '#cbd5e1';
+      let textColor = '#475569';
 
       if (isDanger) {
         badgeColor = '#ef4444';

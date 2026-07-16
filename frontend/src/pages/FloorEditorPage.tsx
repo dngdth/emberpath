@@ -547,7 +547,7 @@ export function FloorEditorPage() {
 
   function updateSelectedObject(patch: Partial<FloorPlanObject>) {
     if (!selectedObject) return;
-    
+
     // Intercept ID change to keep selection active
     if (patch.id && patch.id !== selectedObject.id) {
       editor.updateObject(selectedObject.id, patch);
@@ -565,7 +565,7 @@ export function FloorEditorPage() {
       )}
       style={{ fontFamily: "'Inter', sans-serif" }}
     >
-      
+
       {/* 1. COMPACT INTEGRATED HEADER (FIGMA STYLE) */}
       <header
         className={clsx(
@@ -743,7 +743,7 @@ export function FloorEditorPage() {
 
       {/* 2. FULL CANVAS WORKSPACE WITH FLOATING SIDEBARS (FIGMA LAYOUT) */}
       <div className="flex-1 w-full relative overflow-hidden bg-slate-950">
-        
+
         {/* BACKGROUND CANVAS - TAKES 100% SIZE */}
         <div className="absolute inset-0 z-10 w-full h-full">
           {loading ? (
@@ -751,73 +751,76 @@ export function FloorEditorPage() {
               <Activity className="animate-spin text-blue-500" size={28} />
               <span className="text-xs font-semibold">Đang nạp sơ đồ mặt bằng...</span>
             </div>
-          ) : history.state.length === 0 && editMode ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-400 bg-slate-950 p-6">
-              <Activity className="text-blue-500 animate-pulse" size={32} />
-              <div className="text-center">
-                <span className="block font-black text-sm">Bản vẽ trống</span>
-                <span className="block text-[11px] opacity-70 mt-1 text-slate-500">
-                  Hãy di chuyển chuột vào mép trái màn hình để bật Thư viện Token và kéo thả vào đây.
-                </span>
-              </div>
-            </div>
           ) : (
-            <CanvasEditor
-              canvasWidth={canvasWidth}
-              canvasHeight={canvasHeight}
-              onUpdateCanvasSize={(w, h) => {
-                setCanvasWidth(w);
-                setCanvasHeight(h);
-              }}
-              onCommitCanvasResize={(w, h, shiftX, shiftY) => {
-                setCanvasWidth(w);
-                setCanvasHeight(h);
-                if (shiftX !== 0 || shiftY !== 0) {
-                  const updatedObjects = history.state.map((obj) => {
-                    if (obj.type === 'connector') return obj;
-                    return {
-                      ...obj,
-                      x: obj.x + shiftX,
-                      y: obj.y + shiftY,
-                    };
-                  });
-                  history.set(updatedObjects);
-                }
-              }}
-              safePath={safePath}
-              objects={history.state}
-              selectedIds={selection.selectedIds}
-              activeTool={editor.activeTool}
-              scale={zoomPan.scale}
-              position={zoomPan.position}
-              snapEnabled={editor.snapEnabled}
-              onViewportChange={setEditorViewport}
-              onStageChange={(patch) => {
-                if (patch.scale !== undefined) zoomPan.setScale(patch.scale);
-                if (patch.position) zoomPan.setPosition(patch.position);
-              }}
-              onAddObject={editor.addObject}
-              onAddCustomObject={(obj) => {
-                history.set([...history.state, obj]);
-              }}
-              onSelect={(id, append) => (append ? selection.toggleSelection(id) : selection.selectOne(id))}
-              onClearSelection={selection.clearSelection}
-              onSelectionBox={selection.setSelectedIds}
-              onUpdateObject={editor.updateObject}
-              onContextAction={handleContextAction}
-              
-              // Redesign Props
-              editMode={editMode}
-              belowObjects={belowObjects}
-              showBelowBaseline={showBelowBaseline}
-              sensors={allSensors}
+            <>
+              <CanvasEditor
+                canvasWidth={canvasWidth}
+                canvasHeight={canvasHeight}
+                onUpdateCanvasSize={(w, h) => {
+                  setCanvasWidth(w);
+                  setCanvasHeight(h);
+                }}
+                onCommitCanvasResize={(w, h, shiftX, shiftY) => {
+                  setCanvasWidth(w);
+                  setCanvasHeight(h);
+                  if (shiftX !== 0 || shiftY !== 0) {
+                    const updatedObjects = history.state.map((obj) => {
+                      if (obj.type === 'connector') return obj;
+                      return {
+                        ...obj,
+                        x: obj.x + shiftX,
+                        y: obj.y + shiftY,
+                      };
+                    });
+                    history.set(updatedObjects);
+                  }
+                }}
+                safePath={safePath}
+                objects={history.state}
+                selectedIds={selection.selectedIds}
+                activeTool={editor.activeTool}
+                scale={zoomPan.scale}
+                position={zoomPan.position}
+                snapEnabled={editor.snapEnabled}
+                onViewportChange={setEditorViewport}
+                onStageChange={(patch) => {
+                  if (patch.scale !== undefined) zoomPan.setScale(patch.scale);
+                  if (patch.position) zoomPan.setPosition(patch.position);
+                }}
+                onAddObject={editor.addObject}
+                onAddCustomObject={(obj) => {
+                  history.set([...history.state, obj]);
+                }}
+                onSelect={(id, append) => (append ? selection.toggleSelection(id) : selection.selectOne(id))}
+                onClearSelection={selection.clearSelection}
+                onSelectionBox={selection.setSelectedIds}
+                onUpdateObject={editor.updateObject}
+                onContextAction={handleContextAction}
 
-              // Zoom Callbacks
-              onZoomIn={() => zoomPan.zoomIn(editorViewport)}
-              onZoomOut={() => zoomPan.zoomOut(editorViewport)}
-              onFit={() => zoomPan.fitView(editorViewport)}
-              onReset={() => zoomPan.resetView(editorViewport)}
-            />
+                // Redesign Props
+                editMode={editMode}
+                belowObjects={belowObjects}
+                showBelowBaseline={showBelowBaseline}
+                sensors={allSensors}
+
+                // Zoom Callbacks
+                onZoomIn={() => zoomPan.zoomIn(editorViewport)}
+                onZoomOut={() => zoomPan.zoomOut(editorViewport)}
+                onFit={() => zoomPan.fitView(editorViewport)}
+                onReset={() => zoomPan.resetView(editorViewport)}
+              />
+              {history.state.length === 0 && editMode && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-450 bg-transparent p-6 pointer-events-none select-none z-10">
+                  <Activity className="text-blue-500 animate-pulse" size={32} />
+                  <div className="text-center">
+                    <span className="block font-black text-sm">Bản vẽ trống</span>
+                    <span className="block text-[11px] opacity-70 mt-1 text-slate-500">
+                      Hãy di chuyển chuột vào mép trái màn hình để bật Thư viện Token và kéo thả vào đây.
+                    </span>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
 
@@ -854,8 +857,8 @@ export function FloorEditorPage() {
         {/* FLOATING SIDEBAR LEFT: FLOORS LIST & TOKEN LIBRARY (FIGMA LAYERS STYLING) */}
         <aside
           className={clsx(
-            'absolute left-4 top-4 bottom-4 w-72 max-w-[calc(100vw-32px)] z-20 overflow-hidden shadow-2xl backdrop-blur-md rounded-2xl border transition-all duration-300 flex flex-col',
-            isDark ? 'border-slate-800/80 bg-slate-900/90' : 'border-slate-200/80 bg-white/90',
+            'absolute left-4 top-4 bottom-4 w-72 max-w-[calc(100vw-32px)] z-20 overflow-hidden backdrop-blur-md rounded-2xl border transition-all duration-300 flex flex-col',
+            isDark ? 'border-slate-700/70 bg-slate-900/98 shadow-[0_4px_30px_rgba(0,0,0,0.6)]' : 'border-slate-200/80 bg-white/90 shadow-2xl',
             showLeftPanel ? 'translate-x-0 opacity-100' : '-translate-x-96 opacity-0 pointer-events-none'
           )}
         >
@@ -892,13 +895,12 @@ export function FloorEditorPage() {
                 <span className="text-[10px] font-extrabold uppercase tracking-widest opacity-75">Assets / Thư viện</span>
                 <button
                   onClick={() => editor.setSnapEnabled(!editor.snapEnabled)}
-                  className={`rounded-lg border px-2 py-0.5 text-[9px] font-extrabold transition ${
-                    editor.snapEnabled
-                      ? 'border-blue-500/30 bg-blue-500/10 text-blue-400'
-                      : isDark
-                        ? 'border-slate-800 bg-slate-950 text-slate-400'
-                        : 'border-slate-200 bg-slate-50 text-slate-500'
-                  }`}
+                  className={`rounded-lg border px-2 py-0.5 text-[9px] font-extrabold transition ${editor.snapEnabled
+                    ? 'border-blue-500/30 bg-blue-500/10 text-blue-400'
+                    : isDark
+                      ? 'border-slate-800 bg-slate-950 text-slate-400'
+                      : 'border-slate-200 bg-slate-50 text-slate-500'
+                    }`}
                 >
                   Lưới: {editor.snapEnabled ? 'Bật' : 'Tắt'}
                 </button>
@@ -924,7 +926,7 @@ export function FloorEditorPage() {
                 )}
                 title={`Nét đứt mờ tầng dưới (${floorBelow.name})`}
               >
-                <span>Nét đứt tầng {floorBelow.name}</span>
+                <span>Nét đứt tầng dưới</span>
                 <span>{showBelowBaseline ? 'ON' : 'OFF'}</span>
               </button>
             </div>
@@ -934,8 +936,8 @@ export function FloorEditorPage() {
         {/* FLOATING SIDEBAR RIGHT: PROPERTIES / INSPECTOR (FIGMA INSPECTOR STYLING) */}
         <aside
           className={clsx(
-            'absolute right-4 top-4 bottom-4 w-80 max-w-[calc(100vw-32px)] z-20 overflow-hidden shadow-2xl backdrop-blur-md rounded-2xl border transition-all duration-300 flex flex-col',
-            isDark ? 'border-slate-800/80 bg-slate-900/90' : 'border-slate-200/80 bg-white/90',
+            'absolute right-4 top-4 bottom-4 w-80 max-w-[calc(100vw-32px)] z-20 overflow-hidden backdrop-blur-md rounded-2xl border transition-all duration-300 flex flex-col',
+            isDark ? 'border-slate-700/70 bg-slate-900/98 shadow-[0_4px_30px_rgba(0,0,0,0.6)]' : 'border-slate-200/80 bg-white/90 shadow-2xl',
             showRightPanel ? 'translate-x-0 opacity-100' : 'translate-x-96 opacity-0 pointer-events-none'
           )}
         >

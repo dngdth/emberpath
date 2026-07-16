@@ -5,6 +5,7 @@ import { FloorPlanObject } from '../../types/editor';
 import { SensorDevice } from '../../types/sensor';
 import { getDefaultSize, isResizable, getCanvasPoints, connectorIntersectsWall, isPointInPolygon } from '../../utils/geometryHelpers';
 import { snapPosition } from '../../utils/snapHelpers';
+import { StairsSymbol } from './StairsSymbol';
 import { getGuideLines } from '../../utils/snapHelpers';
 import { useThemeStore } from '../../store/themeStore';
 import { createNewObject } from '../../data/initialMockData';
@@ -210,7 +211,7 @@ export function CanvasEditor(props: Props) {
         const pts = obj.points;
 
         if (isPolygon && pts && pts.length >= 6) {
-          const poly = [];
+          const poly: { x: number; y: number }[] = [];
           for (let i = 0; i < pts.length; i += 2) {
             poly.push({ x: obj.x + pts[i], y: obj.y + pts[i + 1] });
           }
@@ -519,17 +520,17 @@ export function CanvasEditor(props: Props) {
       }
       return isDark ? 'rgba(16, 185, 129, 0.12)' : object.color || 'rgba(234, 217, 207, 0.4)';
     }
-    if (object.type === 'exit') return isDark ? '#065f46' : '#2ea85f';
-    if (object.type === 'door') return isDark ? '#4b5563' : '#d9a36b';
-    if (object.type === 'stairs') return isDark ? '#1e293b' : '#cbd5e1';
-    if (object.type === 'elevator') return isDark ? '#334155' : '#e2e8f0';
-    if (object.type === 'wall') return isDark ? '#475569' : '#64748b';
+    if (object.type === 'exit') return '#2ea85f';
+    if (object.type === 'door') return '#d9a36b';
+    if (object.type === 'stairs') return object.color || '#cbd5e1';
+    if (object.type === 'elevator') return '#e2e8f0';
+    if (object.type === 'wall') return '#64748b';
     if (object.type === 'mq2' || object.type === 'temp') {
       const isDanger = dangerDeviceIds.has(object.id);
       const isWarning = warningDeviceIds.has(object.id);
       if (isDanger) return '#ef4444';
       if (isWarning) return '#f59e0b';
-      return isDark ? '#1e293b' : '#38bdf8';
+      return '#38bdf8';
     }
     if (object.type === 'led') {
       return object.nodeStatus === 'danger' ? '#ef4444' : '#10b981';
@@ -544,6 +545,214 @@ export function CanvasEditor(props: Props) {
     const others = props.objects.filter((o) => o.type !== 'floor_base' && o.type !== 'connector');
     return [...bases, ...others, ...connectors];
   }, [props.objects]);
+
+
+
+  function renderBelowObjectOutline(object: FloorPlanObject) {
+    const width = object.width || getDefaultSize(object.type).width;
+    const height = object.height || getDefaultSize(object.type).height;
+    
+    const strokeColor = isDark 
+      ? 'rgba(165, 180, 252, 0.85)' 
+      : 'rgba(79, 70, 229, 0.35)';
+
+    const strokeWidth = 1.2;
+    const dash = [5, 4];
+    
+    const commonBelowProps = {
+      key: `below-${object.id}`,
+      x: object.x,
+      y: object.y,
+      rotation: object.rotation || 0,
+      listening: false,
+    };
+
+    if (object.type === 'floor_base') {
+      const isPolygon = object.shapeType === 'polygon';
+      const pts = isPolygon ? object.points || [] : [0, 0, width, 0, width, height, 0, height];
+      return (
+        <Group {...commonBelowProps}>
+          <Line
+            points={pts}
+            closed={true}
+            stroke={strokeColor}
+            strokeWidth={strokeWidth}
+            dash={dash}
+            fill={isDark ? 'rgba(30, 41, 59, 0.35)' : 'rgba(203, 213, 225, 0.1)'}
+          />
+        </Group>
+      );
+    }
+
+    if (object.type === 'room') {
+      const isPolygon = object.shapeType === 'polygon';
+      return (
+        <Group {...commonBelowProps}>
+          {isPolygon ? (
+            <Line
+              points={object.points || []}
+              closed={true}
+              stroke={strokeColor}
+              strokeWidth={strokeWidth}
+              dash={dash}
+              fill={isDark ? 'rgba(99, 102, 241, 0.07)' : 'rgba(234, 217, 207, 0.08)'}
+            />
+          ) : (
+            <Rect
+              width={width}
+              height={height}
+              stroke={strokeColor}
+              strokeWidth={strokeWidth}
+              dash={dash}
+              cornerRadius={16}
+              fill={isDark ? 'rgba(99, 102, 241, 0.07)' : 'rgba(234, 217, 207, 0.08)'}
+            />
+          )}
+          <Text
+            text={object.name || ''}
+            x={isPolygon ? (object.points?.[0] || 0) + 12 : 12}
+            y={isPolygon ? (object.points?.[1] || 0) + 12 : 12}
+            fontSize={11}
+            fontStyle="bold"
+            fill={strokeColor}
+            opacity={0.8}
+          />
+        </Group>
+      );
+    }
+
+    if (object.type === 'door') {
+      const doorColor = isDark ? 'rgba(217, 163, 107, 0.45)' : 'rgba(217, 163, 107, 0.25)';
+      return (
+        <Group {...commonBelowProps}>
+          <Rect
+            width={width}
+            height={height}
+            stroke={strokeColor}
+            strokeWidth={strokeWidth}
+            dash={dash}
+            cornerRadius={4}
+            fill={doorColor}
+          />
+          <Line
+            points={[0, 0, width, height]}
+            stroke={strokeColor}
+            strokeWidth={0.8}
+            dash={[3, 3]}
+          />
+          <Text
+            text="Cửa"
+            x={width + 4}
+            y={height / 2 - 5}
+            fontSize={9}
+            fill={strokeColor}
+            opacity={0.8}
+            fontStyle="bold"
+          />
+        </Group>
+      );
+    }
+
+    if (object.type === 'exit') {
+      const exitBgColor = isDark ? 'rgba(16, 185, 129, 0.4)' : 'rgba(46, 168, 95, 0.25)';
+      const exitBorderColor = isDark ? 'rgba(52, 211, 153, 0.85)' : 'rgba(34, 197, 94, 0.4)';
+      return (
+        <Group {...commonBelowProps}>
+          <Rect
+            width={width}
+            height={height}
+            stroke={exitBorderColor}
+            strokeWidth={strokeWidth}
+            dash={dash}
+            cornerRadius={8}
+            fill={exitBgColor}
+          />
+          <Text
+            text="EXIT"
+            width={width}
+            align="center"
+            y={height / 2 - 5}
+            fontStyle="bold"
+            fontSize={9}
+            fill={exitBorderColor}
+            opacity={0.9}
+          />
+        </Group>
+      );
+    }
+
+    if (object.type === 'stairs') {
+      return (
+        <Group {...commonBelowProps}>
+          <Rect
+            width={width}
+            height={height}
+            stroke={strokeColor}
+            strokeWidth={strokeWidth}
+            dash={dash}
+            cornerRadius={8}
+            fill={isDark ? 'rgba(99, 102, 241, 0.15)' : 'rgba(203, 213, 225, 0.2)'}
+          />
+          <StairsSymbol width={width} height={height} strokeColor={strokeColor} strokeWidth={strokeWidth} isDashed={true} />
+        </Group>
+      );
+    }
+
+    if (object.type === 'elevator') {
+      return (
+        <Group {...commonBelowProps}>
+          <Rect
+            width={width}
+            height={height}
+            stroke={strokeColor}
+            strokeWidth={strokeWidth}
+            dash={dash}
+            cornerRadius={8}
+            fill={isDark ? 'rgba(148, 163, 184, 0.25)' : 'rgba(226, 232, 240, 0.2)'}
+          />
+          <Line
+            points={[width / 2, 4, width / 2, height - 4]}
+            stroke={strokeColor}
+            strokeWidth={strokeWidth}
+            dash={dash}
+          />
+        </Group>
+      );
+    }
+
+    if (object.type === 'wall') {
+      const wallColor = isDark ? 'rgba(148, 163, 184, 0.45)' : 'rgba(100, 116, 139, 0.3)';
+      return (
+        <Group {...commonBelowProps}>
+          <Rect
+            width={width}
+            height={height}
+            stroke={strokeColor}
+            strokeWidth={strokeWidth}
+            dash={dash}
+            cornerRadius={2}
+            fill={wallColor}
+          />
+        </Group>
+      );
+    }
+
+    if (object.type === 'label') {
+      return (
+        <Group {...commonBelowProps}>
+          <Text
+            text={object.name || ''}
+            fontSize={object.fontSize || 18}
+            fill={strokeColor}
+            opacity={0.8}
+            fontStyle="bold"
+          />
+        </Group>
+      );
+    }
+
+    return null;
+  }
 
   function renderObject(object: FloorPlanObject) {
     if (object.visible === false || object.id === editingLabelId) return null;
@@ -674,7 +883,7 @@ export function CanvasEditor(props: Props) {
           <Line
             points={pts}
             closed={true}
-            stroke={selected ? '#3b82f6' : isDark ? '#334155' : '#cbd5e1'}
+            stroke={selected ? '#3b82f6' : isDark ? '#475569' : '#cbd5e1'}
             strokeWidth={selected ? 2.5 : 1.5}
             shadowColor="rgba(0, 0, 0, 0.1)"
             shadowBlur={selected ? 8 : 2}
@@ -692,7 +901,7 @@ export function CanvasEditor(props: Props) {
     }
 
     if (object.type === 'room') {
-      const roomStroke = isRoomDanger ? '#ef4444' : selected ? '#3b82f6' : isDark ? '#475569' : '#cbd5e1';
+      const roomStroke = isRoomDanger ? '#ef4444' : selected ? '#3b82f6' : '#cbd5e1';
       return (
         <Group {...commonProps}>
           {object.shapeType === 'polygon' ? (
@@ -786,36 +995,38 @@ export function CanvasEditor(props: Props) {
     }
 
     if (object.type === 'stairs') {
+      const stairStrokeColor = selected ? '#3b82f6' : '#475569';
       return (
         <Group {...commonProps}>
           <Rect
             width={width}
             height={height}
             fill={objectFill(object)}
-            stroke={selected ? '#3b82f6' : isDark ? '#475569' : '#cbd5e1'}
+            stroke={stairStrokeColor}
             strokeWidth={1.5}
-            dash={[6, 4]}
             cornerRadius={8}
           />
-          <Text
-            text="🪜 Stairs"
-            width={width}
-            align="center"
-            y={height / 2 - 6}
-            fontSize={11}
-            fontStyle="bold"
-            fill={isDark ? '#94a3b8' : '#475569'}
-          />
+          <StairsSymbol width={width} height={height} strokeColor={stairStrokeColor} strokeWidth={1.5} isDashed={false} />
           {object.target_floor_id && (
-            <Text
-              text={`-> Floor ${object.target_floor_id}`}
-              width={width}
-              align="center"
-              y={height - 16}
-              fontSize={8}
-              fontStyle="bold"
-              fill={isDark ? '#38bdf8' : '#2563eb'}
-            />
+            <Group x={width / 2 - 25} y={height - 16}>
+              <Rect
+                width={50}
+                height={12}
+                fill={isDark ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.85)'}
+                cornerRadius={3}
+                stroke={isDark ? '#38bdf8' : '#2563eb'}
+                strokeWidth={0.5}
+              />
+              <Text
+                text={`F ${object.target_floor_id}`}
+                width={50}
+                align="center"
+                y={2.5}
+                fontSize={7}
+                fontStyle="bold"
+                fill={isDark ? '#38bdf8' : '#2563eb'}
+              />
+            </Group>
           )}
         </Group>
       );
@@ -828,7 +1039,7 @@ export function CanvasEditor(props: Props) {
             width={width}
             height={height}
             fill={objectFill(object)}
-            stroke={selected ? '#3b82f6' : isDark ? '#475569' : '#cbd5e1'}
+            stroke={selected ? '#3b82f6' : '#cbd5e1'}
             strokeWidth={1.5}
             cornerRadius={8}
           />
@@ -1119,6 +1330,11 @@ export function CanvasEditor(props: Props) {
         <Layer>
           <Group x={props.position.x} y={props.position.y} scaleX={props.scale} scaleY={props.scale}>
             
+            {/* Render underlay of floor below */}
+            {props.showBelowBaseline && props.belowObjects && props.belowObjects
+              .filter((obj) => !['mq2', 'temp', 'led', 'connector'].includes(obj.type))
+              .map(renderBelowObjectOutline)}
+
             {/* Render floor plan objects (Base platform at the bottom) */}
             {sortedObjects.map(renderObject)}
 

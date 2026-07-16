@@ -15,7 +15,6 @@ interface Props {
   activeTool: string;
   scale: number;
   position: { x: number; y: number };
-  panMode: boolean;
   snapEnabled: boolean;
   onStageChange: (patch: { scale?: number; position?: { x: number; y: number } }) => void;
   onAddObject: (type: FloorPlanObject['type'], x: number, y: number) => void;
@@ -59,6 +58,43 @@ export function CanvasEditor(props: Props) {
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState<{ x: number; y: number } | null>(null);
   const [panOrigin, setPanOrigin] = useState<{ x: number; y: number } | null>(null);
+
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInput = activeEl && (
+        activeEl.tagName === 'INPUT' || 
+        activeEl.tagName === 'TEXTAREA' || 
+        activeEl.getAttribute('contenteditable') === 'true'
+      );
+      if (e.code === 'Space' && !isInput) {
+        e.preventDefault();
+        setIsSpacePressed(true);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setIsSpacePressed(false);
+      }
+    };
+
+    const handleBlur = () => {
+      setIsSpacePressed(false);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleBlur);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, []);
 
   // States for inline text editor
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
@@ -229,21 +265,30 @@ export function CanvasEditor(props: Props) {
     const target = event.target;
     const emptyArea = clickedOnEmptyArea(target);
 
-    if (!emptyArea) return;
+    const isPanningAction = isSpacePressed || event.evt.button === 1;
 
-    // Adding objects on click if a tool is active (Edit Mode only)
-    if (props.editMode && props.activeTool !== 'select' && props.activeTool !== 'pan') {
-      const pointer = stagePointerToWorld();
-      if (pointer) {
-        props.onAddObject(props.activeTool as FloorPlanObject['type'], pointer.x, pointer.y);
+    // Adding objects on click if a tool is active (Edit Mode only), unless trying to pan
+    if (props.editMode && props.activeTool !== 'select' && !isPanningAction) {
+      if (emptyArea) {
+        const pointer = stagePointerToWorld();
+        if (pointer) {
+          props.onAddObject(props.activeTool as FloorPlanObject['type'], pointer.x, pointer.y);
+        }
+        return;
       }
+    }
+
+    // Left click pan with Space key, OR Middle click pan
+    if (isPanningAction) {
+      startPan(event.evt.clientX, event.evt.clientY);
       return;
     }
 
-    // Left click pan
+    // Otherwise, normal left click
     if (event.evt.button === 0) {
-      startPan(event.evt.clientX, event.evt.clientY);
-      props.onClearSelection();
+      if (emptyArea) {
+        props.onClearSelection();
+      }
     }
   }
 
@@ -299,26 +344,44 @@ export function CanvasEditor(props: Props) {
     const stage = stageRef.current;
     if (!stage) return;
 
-    const pointer = stage.getPointerPosition();
-    if (!pointer) return;
+    if (e.evt.ctrlKey) {
+      const pointer = stage.getPointerPosition();
+      if (!pointer) return;
 
-    const scaleBy = 1.05;
-    const oldScale = props.scale;
-    const nextScale = e.evt.deltaY < 0 ? oldScale * scaleBy : oldScale / scaleBy;
-    const clampedScale = Math.max(0.3, Math.min(3, nextScale));
+      const scaleBy = 1.05;
+      const oldScale = props.scale;
+      const nextScale = e.evt.deltaY < 0 ? oldScale * scaleBy : oldScale / scaleBy;
+      const clampedScale = Math.max(0.3, Math.min(3, nextScale));
 
-    const mousePointTo = {
-      x: (pointer.x - props.position.x) / oldScale,
-      y: (pointer.y - props.position.y) / oldScale,
-    };
+      const mousePointTo = {
+        x: (pointer.x - props.position.x) / oldScale,
+        y: (pointer.y - props.position.y) / oldScale,
+      };
 
-    props.onStageChange({
-      scale: clampedScale,
-      position: {
-        x: pointer.x - mousePointTo.x * clampedScale,
-        y: pointer.y - mousePointTo.y * clampedScale,
-      },
-    });
+      props.onStageChange({
+        scale: clampedScale,
+        position: {
+          x: pointer.x - mousePointTo.x * clampedScale,
+          y: pointer.y - mousePointTo.y * clampedScale,
+        },
+      });
+    } else {
+      let dx = e.evt.deltaX;
+      let dy = e.evt.deltaY;
+
+      // Shift + scroll scrolls horizontally
+      if (e.evt.shiftKey && dx === 0) {
+        dx = dy;
+        dy = 0;
+      }
+
+      props.onStageChange({
+        position: {
+          x: props.position.x - dx,
+          y: props.position.y - dy,
+        },
+      });
+    }
   }
 
   function objectFill(object: FloorPlanObject) {
@@ -359,11 +422,12 @@ export function CanvasEditor(props: Props) {
       key: object.id,
       x: object.x,
       y: object.y,
-      draggable: !object.locked && !isPanning && props.editMode,
+      draggable: !object.locked && !isPanning && !isSpacePressed && props.editMode,
       rotation: object.rotation || 0,
       dragBoundFunc: (pos: { x: number; y: number }) => pos,
 
       onClick: (event: Konva.KonvaEventObject<MouseEvent>) => {
+        if (isSpacePressed || event.evt.button === 1) return;
         event.cancelBubble = true;
         props.onSelect(object.id, event.evt.shiftKey);
       },
@@ -660,10 +724,10 @@ export function CanvasEditor(props: Props) {
           text={object.name || 'Label'}
           fontSize={object.fontSize || 20}
           fill={
-            object.color
-              ? (object.color === '#f8fafc' && !isDark)
+            object.textColor || object.color
+              ? ((object.textColor === '#f8fafc' || object.color === '#f8fafc') && !isDark)
                 ? '#1e293b'
-                : object.color
+                : (object.textColor || object.color)
               : (isDark ? '#f8fafc' : '#1e293b')
           }
           fontStyle="bold"
@@ -677,7 +741,7 @@ export function CanvasEditor(props: Props) {
       ref={wrapperRef}
       className="relative h-full w-full overflow-hidden bg-slate-950"
       style={{
-        cursor: isPanning ? 'grabbing' : 'default',
+        cursor: isPanning ? 'grabbing' : isSpacePressed ? 'grab' : 'default',
       }}
       onMouseLeave={handleMouseUp}
       onDragOver={handleDragOver}

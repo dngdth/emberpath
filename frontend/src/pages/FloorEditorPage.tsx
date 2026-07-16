@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import api from '../utils/api';
 import { useAuthStore } from '../store/authStore';
 import { useThemeStore } from '../store/themeStore';
@@ -31,8 +31,6 @@ import {
   Save,
   Download,
   Upload,
-  MousePointer,
-  Hand,
 } from 'lucide-react';
 import { SwitchTheme } from '../components/UI/SwitchTheme';
 import clsx from 'clsx';
@@ -48,6 +46,34 @@ export function FloorEditorPage() {
   // Figma Style Sidebar floating toggle states
   const [showLeftPanel, setShowLeftPanel] = useState(true);
   const [showRightPanel, setShowRightPanel] = useState(true);
+
+  // Auto-collapse sidebars on mobile to prevent overlapping
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 768) {
+        if (showLeftPanel && showRightPanel) {
+          setShowRightPanel(false);
+        }
+      }
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [showLeftPanel, showRightPanel]);
+
+  const toggleLeftPanel = useCallback(() => {
+    if (!showLeftPanel && window.innerWidth < 768) {
+      setShowRightPanel(false);
+    }
+    setShowLeftPanel((prev) => !prev);
+  }, [showLeftPanel]);
+
+  const toggleRightPanel = useCallback(() => {
+    if (!showRightPanel && window.innerWidth < 768) {
+      setShowLeftPanel(false);
+    }
+    setShowRightPanel((prev) => !prev);
+  }, [showRightPanel]);
 
   // Dropdown active state
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
@@ -66,6 +92,7 @@ export function FloorEditorPage() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [floorToDelete, setFloorToDelete] = useState<FloorItem | null>(null);
 
+  // Rename modal visibility
   const [renameModalOpen, setRenameModalOpen] = useState(false);
   const [floorToRename, setFloorToRename] = useState<FloorItem | null>(null); // null means adding
 
@@ -78,6 +105,36 @@ export function FloorEditorPage() {
   const zoomPan = useZoomPan();
   const selection = useSelection();
   const editor = useEditorState(history.state, history.set);
+
+  // Keep a stable ref to history.state to prevent stale state issues in deferred saves
+  const objectsRef = useRef<FloorPlanObject[]>(history.state);
+  useEffect(() => {
+    objectsRef.current = history.state;
+  }, [history.state]);
+
+  // Save current floor plan with a deferred callback to prevent text area blur race condition
+  const savePlan = useCallback(async () => {
+    if (!activeFloorId) return;
+    setSaving(true);
+
+    // Force blur on the active element (e.g. inline textarea) to trigger state updates
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+
+    // Delay slightly to let React finish batching the state updates
+    setTimeout(async () => {
+      try {
+        await api.put(`/floors/${activeFloorId}/plan`, { objects: objectsRef.current });
+        setToast('Đã lưu sơ đồ thành công');
+      } catch (err) {
+        console.error('Failed to save plan:', err);
+        alert('Không thể lưu sơ đồ mặt bằng.');
+      } finally {
+        setSaving(false);
+      }
+    }, 100);
+  }, [activeFloorId]);
 
   // Load live sensor data for monitoring
   const { summary, mq2, temperature, loading: sensorsLoading, wsStatus } = useRealtimeSensors(
@@ -150,6 +207,10 @@ export function FloorEditorPage() {
     if (!editMode) return;
 
     function onKeyDown(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        void savePlan();
+      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
         event.preventDefault();
         history.undo();
@@ -167,6 +228,11 @@ export function FloorEditorPage() {
         event.preventDefault();
         editor.copyObjects(selection.selectedIds);
       }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'x') {
+        event.preventDefault();
+        editor.cutObjects(selection.selectedIds);
+        selection.clearSelection();
+      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') {
         event.preventDefault();
         const ids = editor.pasteObjects();
@@ -177,11 +243,16 @@ export function FloorEditorPage() {
         editor.removeObjects(selection.selectedIds);
         selection.clearSelection();
       }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        editor.setActiveTool('select');
+        selection.clearSelection();
+      }
     }
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [editor, history, selection, editMode]);
+  }, [editor, history, selection, editMode, savePlan]);
 
   useEffect(() => {
     void loadFloors();
@@ -291,19 +362,9 @@ export function FloorEditorPage() {
     }
   }
 
-  // Save current floor plan
-  async function savePlan() {
-    if (!activeFloorId) return;
-    setSaving(true);
-    try {
-      await api.put(`/floors/${activeFloorId}/plan`, { objects: history.state });
-      setToast('Đã lưu sơ đồ thành công');
-    } finally {
-      setSaving(false);
-    }
-  }
 
-  function handleToolPick(type: ObjectType) {
+
+  function handleToolPick(type: ObjectType | 'select') {
     editor.setActiveTool(type);
   }
 
@@ -489,7 +550,7 @@ export function FloorEditorPage() {
           </a>
 
           <div>
-            <h1 className="text-xs font-black tracking-tight leading-tight uppercase opacity-90">
+            <h1 className="hidden sm:block text-xs font-black tracking-tight leading-tight uppercase opacity-90">
               {user?.building.name}
             </h1>
           </div>
@@ -499,52 +560,8 @@ export function FloorEditorPage() {
         <div className="flex items-center gap-3">
           {editMode ? (
             <>
-              {/* Minimalist Switcher (Select vs Pan icons only - Figma Style) */}
-              <div
-                className={clsx(
-                  'flex items-center border rounded-xl overflow-hidden shadow-sm',
-                  isDark ? 'border-slate-850 bg-slate-900/60' : 'border-slate-200 bg-white'
-                )}
-              >
-                <button
-                  onClick={() => {
-                    editor.setActiveTool('select');
-                    selection.clearSelection();
-                  }}
-                  className={clsx(
-                    'p-2.5 transition text-inherit flex items-center justify-center h-8 w-9',
-                    editor.activeTool === 'select'
-                      ? 'bg-blue-600 text-white shadow-inner font-bold'
-                      : isDark
-                        ? 'hover:bg-slate-800 text-slate-400 hover:text-white'
-                        : 'hover:bg-slate-100 text-slate-600 hover:text-slate-900'
-                  )}
-                  title="Con trỏ chọn (V)"
-                >
-                  <MousePointer size={13} />
-                </button>
-                <span className={`h-4 w-px ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`} />
-                <button
-                  onClick={() => {
-                    editor.setActiveTool('pan');
-                    selection.clearSelection();
-                  }}
-                  className={clsx(
-                    'p-2.5 transition text-inherit flex items-center justify-center h-8 w-9',
-                    editor.activeTool === 'pan'
-                      ? 'bg-blue-600 text-white shadow-inner font-bold'
-                      : isDark
-                        ? 'hover:bg-slate-800 text-slate-400 hover:text-white'
-                        : 'hover:bg-slate-100 text-slate-600 hover:text-slate-900'
-                  )}
-                  title="Di chuyển canvas (H)"
-                >
-                  <Hand size={13} />
-                </button>
-              </div>
-
               {/* History Undo / Redo */}
-              <div className={clsx('flex items-center border rounded-xl overflow-hidden', isDark ? 'border-slate-855 bg-slate-900/60' : 'border-slate-200 bg-white')}>
+              <div className={clsx('hidden md:flex items-center border rounded-xl overflow-hidden', isDark ? 'border-slate-855 bg-slate-900/60' : 'border-slate-200 bg-white')}>
                 <button
                   onClick={history.undo}
                   disabled={!history.canUndo}
@@ -571,11 +588,11 @@ export function FloorEditorPage() {
                 title="Lưu sơ đồ thiết kế vào hệ thống (Ctrl+S)"
               >
                 <Save size={13} />
-                <span>Lưu sơ đồ</span>
+                <span className="hidden sm:inline">Lưu sơ đồ</span>
               </button>
 
               {/* Export/Import JSON Dropdown */}
-              <div className="relative font-sans" ref={fileMenuRef}>
+              <div className="relative font-sans hidden md:block" ref={fileMenuRef}>
                 <button
                   onClick={() => setFileMenuOpen(!fileMenuOpen)}
                   className={clsx(
@@ -711,7 +728,6 @@ export function FloorEditorPage() {
               objects={history.state}
               selectedIds={selection.selectedIds}
               activeTool={editor.activeTool}
-              panMode={editor.activeTool === 'pan'}
               scale={zoomPan.scale}
               position={zoomPan.position}
               snapEnabled={editor.snapEnabled}
@@ -745,10 +761,10 @@ export function FloorEditorPage() {
         {/* FLOATING HOVER SENSOR ZONE - LEFT */}
         <div className="absolute left-0 top-0 bottom-0 w-6 z-30 group flex items-center justify-start">
           <button
-            onClick={() => setShowLeftPanel(!showLeftPanel)}
+            onClick={toggleLeftPanel}
             className={clsx(
               'h-14 w-7 rounded-r-2xl border border-l-0 flex items-center justify-center transition-all duration-205 shadow-2xl backdrop-blur-md cursor-pointer',
-              'opacity-0 group-hover:opacity-100 -translate-x-3 group-hover:translate-x-0',
+              'opacity-100 md:opacity-0 md:group-hover:opacity-100 translate-x-0 md:-translate-x-3 md:group-hover:translate-x-0',
               isDark ? 'bg-slate-900/90 border-slate-800 text-slate-350 hover:text-white' : 'bg-white/90 border-slate-200 text-slate-700 hover:text-slate-950'
             )}
             title={showLeftPanel ? 'Thu gọn sidebar trái' : 'Mở rộng sidebar trái'}
@@ -760,10 +776,10 @@ export function FloorEditorPage() {
         {/* FLOATING HOVER SENSOR ZONE - RIGHT */}
         <div className="absolute right-0 top-0 bottom-0 w-6 z-30 group flex items-center justify-end">
           <button
-            onClick={() => setShowRightPanel(!showRightPanel)}
+            onClick={toggleRightPanel}
             className={clsx(
               'h-14 w-7 rounded-l-2xl border border-r-0 flex items-center justify-center transition-all duration-205 shadow-2xl backdrop-blur-md cursor-pointer',
-              'opacity-0 group-hover:opacity-100 translate-x-3 group-hover:translate-x-0',
+              'opacity-100 md:opacity-0 md:group-hover:opacity-100 translate-x-0 md:translate-x-3 md:group-hover:translate-x-0',
               isDark ? 'bg-slate-900/90 border-slate-800 text-slate-350 hover:text-white' : 'bg-white/90 border-slate-200 text-slate-700 hover:text-slate-950'
             )}
             title={showRightPanel ? 'Thu gọn panel phải' : 'Mở rộng panel phải'}
@@ -775,7 +791,7 @@ export function FloorEditorPage() {
         {/* FLOATING SIDEBAR LEFT: FLOORS LIST & TOKEN LIBRARY (FIGMA LAYERS STYLING) */}
         <aside
           className={clsx(
-            'absolute left-4 top-4 bottom-4 w-72 z-20 overflow-hidden shadow-2xl backdrop-blur-md rounded-2xl border transition-all duration-300 flex flex-col',
+            'absolute left-4 top-4 bottom-4 w-72 max-w-[calc(100vw-32px)] z-20 overflow-hidden shadow-2xl backdrop-blur-md rounded-2xl border transition-all duration-300 flex flex-col',
             isDark ? 'border-slate-800/80 bg-slate-900/90' : 'border-slate-200/80 bg-white/90',
             showLeftPanel ? 'translate-x-0 opacity-100' : '-translate-x-96 opacity-0 pointer-events-none'
           )}
@@ -855,7 +871,7 @@ export function FloorEditorPage() {
         {/* FLOATING SIDEBAR RIGHT: PROPERTIES / INSPECTOR (FIGMA INSPECTOR STYLING) */}
         <aside
           className={clsx(
-            'absolute right-4 top-4 bottom-4 w-80 z-20 overflow-hidden shadow-2xl backdrop-blur-md rounded-2xl border transition-all duration-300 flex flex-col',
+            'absolute right-4 top-4 bottom-4 w-80 max-w-[calc(100vw-32px)] z-20 overflow-hidden shadow-2xl backdrop-blur-md rounded-2xl border transition-all duration-300 flex flex-col',
             isDark ? 'border-slate-800/80 bg-slate-900/90' : 'border-slate-200/80 bg-white/90',
             showRightPanel ? 'translate-x-0 opacity-100' : 'translate-x-96 opacity-0 pointer-events-none'
           )}

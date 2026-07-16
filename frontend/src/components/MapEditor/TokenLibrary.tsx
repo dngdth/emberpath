@@ -8,7 +8,7 @@ export function TokenLibrary({
   onSelect,
 }: {
   activeTool: string;
-  onSelect: (type: ObjectType) => void;
+  onSelect: (type: ObjectType | 'select') => void;
 }) {
   const { darkMode } = useThemeStore();
   const isDark = darkMode;
@@ -25,7 +25,13 @@ export function TokenLibrary({
             onDragStart={(e) => {
               e.dataTransfer.setData('text/plain', token.type);
             }}
-            onClick={() => onSelect(token.type)}
+            onClick={() => {
+              if (activeTool === token.type) {
+                onSelect('select');
+              } else {
+                onSelect(token.type);
+              }
+            }}
             className={clsx(
               'w-full rounded-2xl border px-4 py-3 text-left transition duration-200 cursor-grab active:cursor-grabbing select-none',
               isActive

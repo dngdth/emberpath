@@ -592,7 +592,13 @@ export function FloorPlanViewer({
           text={obj.name || ''}
           fontSize={obj.fontSize || 18}
           fontStyle="bold"
-          fill={obj.color || (isDark ? '#94a3b8' : '#475569')}
+          fill={
+            obj.textColor || obj.color
+              ? ((obj.textColor === '#f8fafc' || obj.color === '#f8fafc') && !isDark)
+                ? '#475569'
+                : (obj.textColor || obj.color)
+              : (isDark ? '#94a3b8' : '#475569')
+          }
         />
       </Group>
     );

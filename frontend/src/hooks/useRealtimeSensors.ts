@@ -17,6 +17,8 @@ export function useRealtimeSensors(selectedFloor?: number | null, search?: strin
   const [temperature, setTemperature] = useState<SensorDevice[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
+
   const queryParams = useMemo(() => {
     const params = new URLSearchParams();
     if (selectedFloor) params.set('floor_id', String(selectedFloor));
@@ -55,19 +57,51 @@ export function useRealtimeSensors(selectedFloor?: number | null, search?: strin
     if (!token) return;
     const base = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
     const wsUrl = base.replace('http', 'ws') + `/ws/sensors?token=${token}`;
-    const socket = new WebSocket(wsUrl);
+    
+    let socket: WebSocket | null = null;
+    let reconnectTimeout: number | null = null;
 
-    socket.onmessage = (event) => {
-      const payload = JSON.parse(event.data);
-      if (payload.type === 'sensor_tick') {
-        void refreshData(); // am tham, khong set loading
-      }
-    };
+    function connect() {
+      setWsStatus('connecting');
+      socket = new WebSocket(wsUrl);
+
+      socket.onopen = () => {
+        setWsStatus('connected');
+      };
+
+      socket.onmessage = (event) => {
+        const payload = JSON.parse(event.data);
+        if (payload.type === 'sensor_tick') {
+          void refreshData(); // am tham, khong set loading
+        }
+      };
+
+      socket.onclose = () => {
+        setWsStatus('disconnected');
+        // Auto reconnect after 3 seconds
+        reconnectTimeout = window.setTimeout(() => {
+          connect();
+        }, 3000);
+      };
+
+      socket.onerror = () => {
+        setWsStatus('disconnected');
+      };
+    }
+
+    connect();
 
     return () => {
-      socket.close();
+      if (socket) {
+        // Remove close listener to prevent reconnect when unmounting
+        socket.onclose = null;
+        socket.close();
+      }
+      if (reconnectTimeout) {
+        window.clearTimeout(reconnectTimeout);
+      }
     };
   }, [queryParams]);
 
-  return { summary, mq2, temperature, loading, refresh: fetchAll };
+  return { summary, mq2, temperature, loading, wsStatus, refresh: fetchAll };
 }

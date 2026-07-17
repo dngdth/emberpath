@@ -1,5 +1,5 @@
 import { SensorDevice } from '../../types/sensor';
-import { SensorCard } from '../SensorCard';
+import { SensorCard } from './SensorCard';
 
 export function SensorList({ title, sensors }: { title: string; sensors: SensorDevice[] }) {
   return (

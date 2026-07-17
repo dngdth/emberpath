@@ -87,5 +87,3 @@ Thumbs.db
 .cache/
 *.log
 
-# Local run scripts
-backend/run.sh

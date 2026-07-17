@@ -76,7 +76,15 @@ def get_floor_plan(floor_id: int, current_user: User = Depends(get_current_user)
         db.commit()
         db.refresh(plan)
     objects = json.loads(plan.canvas_json or "[]")
-    return FloorPlanResponse(floor_id=floor.id, floor_name=floor.name, objects=objects, version=plan.version)
+    return FloorPlanResponse(
+        floor_id=floor.id,
+        floor_name=floor.name,
+        objects=objects,
+        version=plan.version,
+        canvas_width=plan.canvas_width if plan.canvas_width is not None else 1600.0,
+        canvas_height=plan.canvas_height if plan.canvas_height is not None else 1000.0,
+        canvas_shape=plan.canvas_shape if plan.canvas_shape is not None else "rect",
+    )
 
 
 @router.put("/{floor_id}/plan", response_model=FloorPlanResponse)
@@ -97,6 +105,9 @@ def save_floor_plan(
         db.flush()
 
     plan.canvas_json = json.dumps([obj.model_dump(exclude_none=True, by_alias=True) for obj in payload.objects])
+    plan.canvas_width = payload.canvas_width
+    plan.canvas_height = payload.canvas_height
+    plan.canvas_shape = payload.canvas_shape
     plan.version += 1
 
     db.execute(delete(PlanObject).where(PlanObject.plan_id == plan.id))
@@ -119,12 +130,22 @@ def save_floor_plan(
             node_status=obj.nodeStatus,
             locked=obj.locked,
             visible=obj.visible,
+            shape_type=obj.shapeType,
+            target_floor_id=obj.target_floor_id,
         )
         for obj in payload.objects
     ])
 
     db.commit()
-    return FloorPlanResponse(floor_id=floor.id, floor_name=floor.name, objects=payload.objects, version=plan.version)
+    return FloorPlanResponse(
+        floor_id=floor.id,
+        floor_name=floor.name,
+        objects=payload.objects,
+        version=plan.version,
+        canvas_width=plan.canvas_width,
+        canvas_height=plan.canvas_height,
+        canvas_shape=plan.canvas_shape,
+    )
 
 
 @router.get("/{floor_id}/path", response_model=list[str])

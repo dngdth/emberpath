@@ -7,10 +7,25 @@
   font-family: Inter, system-ui, sans-serif;
 }
 
-html,
-body,
+html {
+  min-height: 100%;
+  width: 100%;
+  overflow-x: hidden;
+  overscroll-behavior-y: none !important;
+}
+
+body {
+  min-height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overscroll-behavior-y: none !important;
+}
+
 #root {
   min-height: 100%;
+  width: 100%;
+  overscroll-behavior-y: none !important;
 }
 
 body {
@@ -66,20 +81,45 @@ button {
 }
 
 *::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 
 *::-webkit-scrollbar-track {
-  background: #f3e6de;
-  border-radius: 999px;
+  background: transparent;
 }
 
 *::-webkit-scrollbar-thumb {
-  background: #c58a74;
+  background: #cbd5e1;
   border-radius: 999px;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: #b86f56;
+  background: #94a3b8;
 }
+
+.dark *::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.dark *::-webkit-scrollbar-thumb {
+  background: #475569;
+}
+
+.dark *::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Theme transition reveal effect rules */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(root) {
+  z-index: 1;
+}
+::view-transition-new(root) {
+  z-index: 999;
+}

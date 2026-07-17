@@ -26,6 +26,21 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
+        from sqlalchemy import text
+        try:
+            db.execute(text("SELECT canvas_width, canvas_height FROM floor_plans LIMIT 1"))
+        except Exception:
+            db.rollback()
+            try:
+                db.execute(text("ALTER TABLE floor_plans ADD COLUMN canvas_width FLOAT DEFAULT 1600.0"))
+            except Exception:
+                pass
+            try:
+                db.execute(text("ALTER TABLE floor_plans ADD COLUMN canvas_height FLOAT DEFAULT 1000.0"))
+            except Exception:
+                pass
+            db.commit()
+
         if settings.seed_demo_data:
             seed_database(db)
     finally:

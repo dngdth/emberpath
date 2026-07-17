@@ -1,14 +1,27 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AxiosError } from 'axios';
+import { Shield } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
+import { useThemeStore } from '../store/themeStore';
+import { SwitchTheme } from '../components/UI/SwitchTheme';
+import { LoginBrandPanel } from '../components/Login/LoginBrandPanel';
+import { LoginForm } from '../components/Login/LoginForm';
+import { DemoAccounts } from '../components/Login/DemoAccounts';
 
 export function LoginPage() {
   const navigate = useNavigate();
   const { login, loading } = useAuthStore();
+  const { darkMode } = useThemeStore();
+  
   const [email, setEmail] = useState('admin@buildinga.demo');
   const [password, setPassword] = useState('123456');
   const [error, setError] = useState('');
+
+  // Set page title
+  useEffect(() => {
+    document.title = 'Emberpath – Đăng nhập hệ thống';
+  }, []);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -18,93 +31,87 @@ export function LoginPage() {
       await login(email, password);
       navigate('/dashboard');
     } catch (err) {
-      const message = (err as AxiosError<{ detail?: string }>).response?.data?.detail || 'Đăng nhập thất bại';
+      const message =
+        (err as AxiosError<{ detail?: string }>).response?.data?.detail ||
+        'Đăng nhập thất bại. Vui lòng kiểm tra lại thông tin.';
       setError(message);
     }
   }
 
+  const handleSelectDemo = (demoEmail: string, demoPass: string) => {
+    setEmail(demoEmail);
+    setPassword(demoPass);
+    setError('');
+  };
+
+  const isDark = darkMode;
+
   return (
-    <div className="min-h-screen bg-[#f2e4dc] px-4 py-10">
-      <div className="mx-auto grid max-w-6xl gap-10 lg:grid-cols-[1.15fr_0.85fr]">
-        <div className="flex flex-col justify-center">
-          <p className="mb-3 inline-flex w-fit rounded-full border border-[#dfb9a8] bg-[#fff4ee] px-3 py-1 text-sm font-medium text-[#b33a2f]">
-            Escape Mesh MVP
-          </p>
+    <div
+      className={`min-h-screen w-full flex items-center justify-center transition-colors duration-300 p-4 sm:p-6 lg:p-8 relative ${
+        isDark ? 'dark bg-[#0F172A] text-slate-100' : 'bg-slate-50 text-slate-800'
+      }`}
+      style={{ fontFamily: "'Inter', sans-serif" }}
+    >
+      {/* Floating Switch Theme Button */}
+      <div className="absolute top-4 right-4 sm:top-6 sm:right-6 z-20">
+        <SwitchTheme />
+      </div>
 
-          <h1 className="max-w-3xl text-4xl font-bold leading-tight text-[#a5261f] lg:text-6xl">
-            Giám sát an toàn tòa nhà và thiết kế sơ đồ LED trên một nền tảng duy nhất.
-          </h1>
+      {/* Main Container Card (Split Screen) */}
+      <div
+        className={`w-full max-w-5xl grid lg:grid-cols-[1.1fr_1fr] rounded-[32px] border shadow-2xl overflow-hidden transition-all duration-300 ${
+          isDark
+            ? 'bg-slate-900/50 border-slate-800/80 shadow-slate-950/40 backdrop-blur-sm'
+            : 'bg-white border-slate-200/80 shadow-slate-200/50'
+        }`}
+      >
+        {/* Left Side: Brand & IoT Simulation Panel (Hidden on mobile) */}
+        <LoginBrandPanel isDark={isDark} />
 
-          <p className="mt-5 max-w-2xl text-lg text-[#8a5a4b]">
-            Dashboard cảm biến ESP32 theo building riêng, editor canvas zoom/pan mượt, mock realtime để test ngay.
-          </p>
-
-          <div className="mt-8 grid gap-4 md:grid-cols-2">
-            {[
-              'Multi-tenant theo building',
-              'Dashboard sensor realtime',
-              'Editor sơ đồ có zoom/pan',
-              'Seed demo sẵn để chạy ngay',
-            ].map((item) => (
-              <div
-                key={item}
-                className="rounded-[22px] border border-[#e2c6bb] bg-[#fff8f3] p-4 text-[#7c2d23] shadow-[0_8px_24px_rgba(122,43,29,0.06)]"
-              >
-                {item}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="rounded-[28px] border border-[#e2c6bb] bg-[#ead9cf] p-8 shadow-[0_12px_30px_rgba(122,43,29,0.08)]">
-          <h2 className="text-2xl font-bold text-[#a5261f]">Đăng nhập</h2>
-          <p className="mt-2 text-sm text-[#8a5a4b]">Dùng tài khoản demo hoặc đăng ký building mới.</p>
-
-          <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
-            <label className="block space-y-1">
-              <span className="text-sm text-[#8f241e]">Email</span>
-              <input
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@buildinga.demo"
-              />
-            </label>
-
-            <label className="block space-y-1">
-              <span className="text-sm text-[#8f241e]">Password</span>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="123456"
-              />
-            </label>
-
-            {error && (
-              <div className="rounded-2xl border border-[#d8453b] bg-[#fde9e7] px-4 py-3 text-sm text-[#a5261f]">
-                {error}
-              </div>
-            )}
-
-            <button
-              disabled={loading}
-              className="w-full rounded-2xl bg-[#c94132] px-4 py-3 font-semibold text-white hover:bg-[#b23326]"
-            >
-              {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
-            </button>
-          </form>
-
-          <div className="mt-6 rounded-2xl border border-[#d8b1a1] bg-[#fff8f3] p-4 text-sm text-[#7c2d23]">
-            <div>Demo admin: <strong>admin@buildinga.demo / 123456</strong></div>
-            <div>Demo operator: <strong>operator@buildinga.demo / 123456</strong></div>
+        {/* Right Side: Form and Quick Demo Action Area */}
+        <div className="p-8 sm:p-12 flex flex-col justify-center relative">
+          {/* Logo on mobile only (hidden on desktop because of LoginBrandPanel) */}
+          <div className="flex items-center gap-2.5 mb-8 lg:hidden">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#F97316] text-white shadow-md shadow-orange-500/20">
+              <Shield className="h-5 w-5" />
+            </div>
+            <span className="text-xl font-bold tracking-tight bg-gradient-to-r from-[#F97316] to-[#3B82F6] bg-clip-text text-transparent">
+              Emberpath
+            </span>
           </div>
 
-          <p className="mt-5 text-sm text-[#8a5a4b]">
-            Chưa có tài khoản?{' '}
-            <Link className="font-medium text-[#b33a2f] hover:text-[#8f241e]" to="/register">
-              Tạo building mới
-            </Link>
-          </p>
+          {/* Form Header */}
+          <div className="text-left mb-6">
+            <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight">Chào mừng trở lại</h2>
+            <p className={`text-sm mt-2 leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              Nhập thông tin tài khoản của bạn để truy cập bảng điều khiển tòa nhà.
+            </p>
+          </div>
+
+          {/* Form Input fields */}
+          <LoginForm
+            email={email}
+            setEmail={setEmail}
+            password={password}
+            setPassword={setPassword}
+            onSubmit={handleSubmit}
+            loading={loading}
+            error={error}
+            isDark={isDark}
+          />
+
+          {/* Separator */}
+          <div className="my-6 flex items-center justify-center gap-3">
+            <div className={`h-[1px] w-full ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`} />
+            <span className={`text-xs uppercase font-bold tracking-wider select-none shrink-0 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
+              Hoặc dùng nhanh
+            </span>
+            <div className={`h-[1px] w-full ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`} />
+          </div>
+
+          {/* Quick Demo Autofill accounts selection */}
+          <DemoAccounts onSelect={handleSelectDemo} isDark={isDark} disabled={loading} />
         </div>
       </div>
     </div>

@@ -1,5 +1,6 @@
 import clsx from 'clsx';
 import { FloorItem } from '../../types/editor';
+import { useThemeStore } from '../../store/themeStore';
 
 export function FloorTabs({
   floors,
@@ -10,6 +11,9 @@ export function FloorTabs({
   activeFloorId: number | null;
   onChange: (id: number) => void;
 }) {
+  const { darkMode } = useThemeStore();
+  const isDark = darkMode;
+
   return (
     <div className="flex flex-wrap gap-2">
       {floors.map((floor) => (
@@ -17,10 +21,12 @@ export function FloorTabs({
           key={floor.id}
           onClick={() => onChange(floor.id)}
           className={clsx(
-            'rounded-xl px-4 py-2 text-sm font-medium transition',
+            'rounded-xl px-4 py-2 text-sm font-semibold transition',
             activeFloorId === floor.id
-              ? 'bg-[#d9a36b] text-white'
-              : 'bg-[#fff8f3] text-[#8f241e] border border-[#dfb9a8] hover:bg-[#f7e8df]',
+              ? 'bg-[#3B82F6] text-white shadow-sm'
+              : isDark
+                ? 'bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800'
+                : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'
           )}
         >
           {floor.name}
@@ -29,3 +35,4 @@ export function FloorTabs({
     </div>
   );
 }
+export default FloorTabs;

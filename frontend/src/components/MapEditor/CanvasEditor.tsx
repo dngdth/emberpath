@@ -337,7 +337,7 @@ function CanvasEditorComponent(props: Props) {
         let current: Konva.Container | Konva.Node | null = intersect;
         while (current) {
           const id = current.id();
-          if (id && props.objects.some((obj) => obj.id === id)) {
+          if (id && props.objects.some((obj) => obj.id === id && !obj.locked)) {
             ids.add(id);
             break;
           }
@@ -468,7 +468,12 @@ function CanvasEditorComponent(props: Props) {
             if (hitIds.length > 0) {
               setErasedIds((prev) => {
                 const next = new Set(prev);
-                hitIds.forEach((id) => next.add(id));
+                hitIds.forEach((id) => {
+                  const obj = objectById.get(id);
+                  if (obj && !obj.locked) {
+                    next.add(id);
+                  }
+                });
                 return next;
               });
             }

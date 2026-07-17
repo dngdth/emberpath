@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { FloorPlanObject } from '../types/editor';
 import { createNewObject } from '../data/initialMockData';
+import { GRID_SIZE } from '../utils/snapHelpers';
 
 export type PenDrawingType = 'floor_base' | 'led_wire' | 'wall';
 
@@ -11,19 +12,75 @@ export interface DrawingState {
   points: number[]; // coordinates relative to (startX, startY)
 }
 
+// Helper function to snap coordinates to orthogonal alignment (relative to the last vertex) and grid lines
+function getSnappedDrawingPoint(
+  x: number,
+  y: number,
+  drawingState: DrawingState | null,
+  snapEnabled: boolean
+) {
+  let snappedX = x;
+  let snappedY = y;
+  const guides: Array<{ points: number[] }> = [];
+
+  // 1. Grid Snapping (if enabled)
+  if (snapEnabled) {
+    const gridX = Math.round(x / GRID_SIZE) * GRID_SIZE;
+    const gridY = Math.round(y / GRID_SIZE) * GRID_SIZE;
+    
+    if (Math.abs(x - gridX) < 10) {
+      snappedX = gridX;
+    }
+    if (Math.abs(y - gridY) < 10) {
+      snappedY = gridY;
+    }
+  }
+
+  // 2. Orthogonal Snapping (relative to the last vertex)
+  if (drawingState && drawingState.points.length >= 2) {
+    const len = drawingState.points.length;
+    const lastX = drawingState.startX + drawingState.points[len - 2];
+    const lastY = drawingState.startY + drawingState.points[len - 1];
+
+    const orthoThreshold = 15; // snapping zone within 15px
+    const diffX = Math.abs(snappedX - lastX);
+    const diffY = Math.abs(snappedY - lastY);
+
+    if (diffY < orthoThreshold) {
+      snappedY = lastY;
+      // Horizontal guide line
+      guides.push({
+        points: [lastX - 2000, lastY, lastX + 2000, lastY],
+      });
+    }
+    if (diffX < orthoThreshold) {
+      snappedX = lastX;
+      // Vertical guide line
+      guides.push({
+        points: [lastX, lastY - 2000, lastX, lastY + 2000],
+      });
+    }
+  }
+
+  return { x: snappedX, y: snappedY, guides };
+}
+
 export function usePenDrawing(
   activeTool: string,
   onAddCustomObject: ((obj: FloorPlanObject) => void) | undefined,
   onAddObject: (type: any, x: number, y: number) => void,
   onSelect: (id: string, append: boolean) => void,
-  onCancel: () => void
+  onCancel: () => void,
+  snapEnabled = true
 ) {
   const [drawingState, setDrawingState] = useState<DrawingState | null>(null);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
+  const [guideLines, setGuideLines] = useState<Array<{ points: number[] }>>([]);
 
   const cancelDrawing = useCallback(() => {
     setDrawingState(null);
     setMousePos(null);
+    setGuideLines([]);
     onCancel();
   }, [onCancel]);
 
@@ -85,6 +142,7 @@ export function usePenDrawing(
 
     setDrawingState(null);
     setMousePos(null);
+    setGuideLines([]);
     onSelect(newObj.id, false);
     onCancel();
   }, [drawingState, cancelDrawing, onAddCustomObject, onAddObject, onSelect, onCancel]);
@@ -108,16 +166,20 @@ export function usePenDrawing(
       return false;
     }
 
+    const snapped = getSnappedDrawingPoint(pointerX, pointerY, drawingState, snapEnabled);
+    const useX = snapped.x;
+    const useY = snapped.y;
+
     if (!drawingState) {
       setDrawingState({
         type: mapToolType,
-        startX: pointerX,
-        startY: pointerY,
+        startX: useX,
+        startY: useY,
         points: [0, 0],
       });
     } else {
-      const dx = pointerX - drawingState.startX;
-      const dy = pointerY - drawingState.startY;
+      const dx = useX - drawingState.startX;
+      const dy = useY - drawingState.startY;
 
       if (isOpenLine) {
         const len = drawingState.points.length;
@@ -150,7 +212,7 @@ export function usePenDrawing(
       }
     }
     return true;
-  }, [activeTool, drawingState, finishDrawing]);
+  }, [activeTool, drawingState, finishDrawing, snapEnabled]);
 
   const handleCanvasDblClick = useCallback(() => {
     if (drawingState) {
@@ -176,9 +238,11 @@ export function usePenDrawing(
 
   const handleMouseMove = useCallback((pointerX: number, pointerY: number) => {
     if (drawingState) {
-      setMousePos({ x: pointerX, y: pointerY });
+      const snapped = getSnappedDrawingPoint(pointerX, pointerY, drawingState, snapEnabled);
+      setMousePos({ x: snapped.x, y: snapped.y });
+      setGuideLines(snapped.guides);
     }
-  }, [drawingState]);
+  }, [drawingState, snapEnabled]);
 
   // Escape key cancels, Enter key finishes, Ctrl+Z undos last point
   useEffect(() => {
@@ -220,6 +284,7 @@ export function usePenDrawing(
   return {
     drawingState,
     mousePos,
+    guideLines,
     handleCanvasClick,
     handleCanvasDblClick,
     handleMouseMove,

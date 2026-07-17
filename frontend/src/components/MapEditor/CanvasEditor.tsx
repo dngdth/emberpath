@@ -86,6 +86,7 @@ function CanvasEditorComponent(props: Props) {
   const {
     drawingState,
     mousePos,
+    guideLines,
     handleCanvasClick,
     handleCanvasDblClick,
     handleMouseMove: handlePenMouseMove,
@@ -95,7 +96,8 @@ function CanvasEditorComponent(props: Props) {
     props.onAddCustomObject,
     props.onAddObject,
     props.onSelect,
-    () => props.onContextAction('select', '')
+    () => props.onContextAction('select', ''),
+    props.snapEnabled
   );
 
   const gridPattern = useMemo(() => {
@@ -995,6 +997,19 @@ function CanvasEditorComponent(props: Props) {
                 )}
               </Group>
             )}
+
+            {/* Render drawing guide lines (snapped axes) */}
+            {drawingState && guideLines && guideLines.map((guide, idx) => (
+              <Line
+                key={`guide-${idx}`}
+                points={guide.points}
+                stroke="#10b981"
+                strokeWidth={1.5 / props.scale}
+                dash={[6, 4]}
+                opacity={0.7}
+                listening={false}
+              />
+            ))}
 
             {/* Eraser Brush Circle Preview */}
             {props.editMode && props.activeTool === 'eraser' && localMousePos && (

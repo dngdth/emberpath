@@ -46,4 +46,4 @@ class DeviceIngestRequest(BaseModel):
     sensorType: str
     value: float
     unit: str
-    timestamp: datetime
+    timestamp: datetime | None = None

@@ -84,7 +84,7 @@ export function PropertyPanel({
 
   // Fetch real sensor devices from database for linking
   useEffect(() => {
-    if (object && (object.type === 'mq2' || object.type === 'temp')) {
+    if (object && (object.type === 'sensor' || object.type === 'mq2' || object.type === 'temp')) {
       setLoadingDevices(true);
       sensorsApi.liveReadings()
         .then((readings) => {
@@ -112,6 +112,7 @@ export function PropertyPanel({
   // Filter options based on type
   const matchingPhysicalDevices = useMemo(() => {
     if (!object) return [];
+    if (object.type === 'sensor') return physicalDevices;
     return physicalDevices.filter((d) => d.sensor_type === object.type);
   }, [physicalDevices, object?.type]);
 
@@ -176,8 +177,8 @@ export function PropertyPanel({
 
   const isLed = object.type === 'led';
   const isLabel = object.type === 'label';
-  const isSensor = object.type === 'mq2' || object.type === 'temp';
-  const showSize = object.type !== 'connector';
+  const isSensor = object.type === 'sensor' || object.type === 'mq2' || object.type === 'temp';
+  const showSize = object.type !== 'connector' && object.type !== 'led_wire';
   const showText = object.type === 'room' || object.type === 'label' || object.type === 'exit' || object.type === 'floor_base';
 
   return (

@@ -44,6 +44,7 @@ export function FloorPlanViewer({
   const [panOrigin, setPanOrigin] = useState({ x: 0, y: 0 });
 
   const safePathLineRef = useRef<Konva.Line | null>(null);
+  const hasDraggedRef = useRef(false);
 
   const gridPattern = useMemo(() => {
     if (typeof window === 'undefined') return null;
@@ -174,17 +175,19 @@ export function FloorPlanViewer({
 
   // Mouse drag panning
   const handleMouseDown = (e: any) => {
-    if (e.target === e.target.getStage() || e.target.hasName('workspace-empty')) {
-      setIsPanning(true);
-      setPanStart({ x: e.evt.clientX, y: e.evt.clientY });
-      setPanOrigin({ x: position.x, y: position.y });
-    }
+    setIsPanning(true);
+    hasDraggedRef.current = false;
+    setPanStart({ x: e.evt.clientX, y: e.evt.clientY });
+    setPanOrigin({ x: position.x, y: position.y });
   };
 
   const handleMouseMove = (e: any) => {
     if (!isPanning) return;
     const dx = e.evt.clientX - panStart.x;
     const dy = e.evt.clientY - panStart.y;
+    if (Math.hypot(dx, dy) > 3) {
+      hasDraggedRef.current = true;
+    }
     setPosition({
       x: panOrigin.x + dx,
       y: panOrigin.y + dy,
@@ -250,7 +253,7 @@ export function FloorPlanViewer({
     const dangerPositions: { x: number; y: number }[] = [];
     
     objects.forEach((obj) => {
-      if (obj.type === 'mq2' || obj.type === 'temp') {
+      if (obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp') {
         if (dangerDeviceIds.has(obj.id)) {
           dangerPositions.push({ x: obj.x, y: obj.y });
         }
@@ -370,11 +373,13 @@ export function FloorPlanViewer({
       y: obj.y,
       rotation: obj.rotation || 0,
       onClick: () => {
+        if (hasDraggedRef.current) return;
         if (obj.type === 'room' && onRoomSelect) {
           onRoomSelect(obj.id);
         }
       },
       onTap: () => {
+        if (hasDraggedRef.current) return;
         if (obj.type === 'room' && onRoomSelect) {
           onRoomSelect(obj.id);
         }
@@ -567,6 +572,31 @@ export function FloorPlanViewer({
     }
 
     if (obj.type === 'wall') {
+      const points = obj.points || [];
+      if (obj.shapeType === 'polygon' && points.length > 0) {
+        const strokeColor = obj.color || (isDark ? '#64748b' : '#94a3b8');
+        return (
+          <Group {...commonProps}>
+            {/* Outer border/casing line for visual definition */}
+            <Line
+              points={points}
+              stroke={isDark ? '#0f172a' : '#cbd5e1'}
+              strokeWidth={8}
+              lineJoin="round"
+              lineCap="round"
+              listening={false}
+            />
+            {/* Main core wall line */}
+            <Line
+              points={points}
+              stroke={strokeColor}
+              strokeWidth={5}
+              lineJoin="round"
+              lineCap="round"
+            />
+          </Group>
+        );
+      }
       return (
         <Group {...commonProps}>
           <Rect
@@ -581,7 +611,7 @@ export function FloorPlanViewer({
       );
     }
 
-    if (obj.type === 'mq2' || obj.type === 'temp') {
+    if (obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp') {
       const isDanger = dangerDeviceIds.has(obj.id);
       const isWarning = warningDeviceIds.has(obj.id);
       
@@ -600,7 +630,10 @@ export function FloorPlanViewer({
       }
 
       const reading = sensorValues.get(obj.id);
-      const label = `${obj.name || (obj.type === 'mq2' ? 'MQ2' : 'Temp')}`;
+      const isMq2 = obj.type === 'mq2' || obj.id.toLowerCase().includes('mq2');
+      const isTemp = obj.type === 'temp' || obj.id.toLowerCase().includes('temp');
+      const icon = isMq2 ? '💨' : isTemp ? '🌡️' : '📡';
+      const label = `${obj.name || (isMq2 ? 'MQ2' : isTemp ? 'Temp' : 'Cảm biến')}`;
       const valueStr = reading ? `${reading.val} ${reading.unit}` : '--';
 
       return (
@@ -617,7 +650,7 @@ export function FloorPlanViewer({
             shadowBlur={isDanger ? 10 : 0}
           />
           <Text
-            text={obj.type === 'mq2' ? '💨' : '🌡️'}
+            text={icon}
             x={13}
             y={13}
             fontSize={16}
@@ -648,9 +681,41 @@ export function FloorPlanViewer({
               y={3}
               fontSize={9}
               fontStyle="bold"
-              fill={isDanger ? '#ef4444' : isDark ? '#38bdf8' : '#3b82f6'}
+              fill={isDanger ? '#ef4444' : isWarning ? '#f59e0b' : isDark ? '#38bdf8' : '#3b82f6'}
             />
           </Group>
+        </Group>
+      );
+    }
+
+    if (obj.type === 'led_wire') {
+      const active = evacuationActive;
+      const points = obj.points || [];
+      const baseStroke = active ? '#10b981' : isDark ? '#334155' : '#cbd5e1';
+
+      return (
+        <Group {...commonProps}>
+          <Line
+            points={points}
+            stroke={baseStroke}
+            strokeWidth={active ? 8 : 3}
+            lineJoin="round"
+            lineCap="round"
+            opacity={active ? 0.35 : 0.6}
+            shadowColor="#10b981"
+            shadowBlur={active ? 12 : 0}
+            shadowOpacity={active ? 0.8 : 0}
+          />
+          <Line
+            name={active ? 'active-led-wire' : undefined}
+            points={points}
+            stroke={active ? '#34d399' : isDark ? '#475569' : '#94a3b8'}
+            strokeWidth={active ? 3.5 : 1.5}
+            lineJoin="round"
+            lineCap="round"
+            dash={active ? [12, 10] : [5, 5]}
+            opacity={active ? 1.0 : 0.8}
+          />
         </Group>
       );
     }
@@ -725,11 +790,18 @@ export function FloorPlanViewer({
       if (!frame) return;
       const time = frame.time;
 
-      // 1. Animate evacuation path line dashOffset
-      if (safePathLineRef.current && evacuationActive) {
+      // 1. Animate evacuation path line dashOffset & LED wires
+      if (evacuationActive) {
         const timeDiff = frame.timeDiff;
         dashOffset = (dashOffset - (timeDiff * 0.05)) % 40;
-        safePathLineRef.current.dashOffset(dashOffset);
+        if (safePathLineRef.current) {
+          safePathLineRef.current.dashOffset(dashOffset);
+        }
+
+        const activeLedWires = stage.find('.active-led-wire');
+        activeLedWires.forEach((node) => {
+          (node as any).dashOffset(dashOffset);
+        });
       }
 
       // 2. Animate blinking danger rooms & warning sensors (500ms intervals)
@@ -883,7 +955,7 @@ export function FloorPlanViewer({
             : 'bg-white border-slate-200 text-slate-600'
         }`}
       >
-        <span>🖱️ Kéo vùng trống để di chuyển • Cuộn chuột để phóng to/thu nhỏ</span>
+        <span>🖱️ Kéo sơ đồ để di chuyển • Cuộn chuột để phóng to/thu nhỏ</span>
         {selectedStartRoomId && (
           <span className={`px-2 py-0.5 rounded font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30`}>
             📍 Điểm chọn: {objects.find(o => o.id === selectedStartRoomId)?.name}

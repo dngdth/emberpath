@@ -9,6 +9,7 @@ import {
   Download,
   Upload,
   Eye,
+  Eraser,
 } from 'lucide-react';
 import { SwitchTheme } from '../UI/SwitchTheme';
 import clsx from 'clsx';
@@ -31,6 +32,8 @@ interface EditorHeaderProps {
   handleImport: () => void;
   fileMenuRef: React.RefObject<HTMLDivElement>;
   clearSelection: () => void;
+  activeTool: string;
+  setActiveTool: (tool: string) => void;
 }
 
 export const EditorHeader: React.FC<EditorHeaderProps> = React.memo(({
@@ -50,6 +53,8 @@ export const EditorHeader: React.FC<EditorHeaderProps> = React.memo(({
   handleImport,
   fileMenuRef,
   clearSelection,
+  activeTool,
+  setActiveTool,
 }) => {
   return (
     <header
@@ -109,6 +114,30 @@ export const EditorHeader: React.FC<EditorHeaderProps> = React.memo(({
                 <Redo2 size={13} />
               </button>
             </div>
+
+            {/* Eraser Tool Toggle */}
+            <button
+              onClick={() => {
+                if (activeTool === 'eraser') {
+                  setActiveTool('select');
+                } else {
+                  setActiveTool('eraser');
+                  clearSelection();
+                }
+              }}
+              className={clsx(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition shadow-sm select-none h-8',
+                activeTool === 'eraser'
+                  ? 'bg-rose-600 border-rose-600 text-white hover:bg-rose-700 shadow-rose-500/20'
+                  : isDark
+                    ? 'border-slate-800 bg-slate-900 text-slate-100 hover:bg-slate-855 hover:text-white'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-55'
+              )}
+              title="Công cụ tẩy (Eraser) - Click kéo để xóa nhanh nhiều vật thể"
+            >
+              <Eraser size={13} />
+              <span>Tẩy</span>
+            </button>
 
             {/* Standalone Save button */}
             <button

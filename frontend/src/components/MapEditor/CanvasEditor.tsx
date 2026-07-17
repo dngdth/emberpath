@@ -9,17 +9,14 @@ import { useThemeStore } from '../../store/themeStore';
 import { createNewObject } from '../../data/initialMockData';
 import { usePenDrawing } from '../../hooks/usePenDrawing';
 import { LedWireShape } from './Shapes/LedWireShape';
+import { WallShape } from './Shapes/WallShape';
 
 // Shape components imports
 import { FloorBaseShape } from './Shapes/FloorBaseShape';
-import { RoomShape } from './Shapes/RoomShape';
-import { DoorShape } from './Shapes/DoorShape';
 import { ExitShape } from './Shapes/ExitShape';
 import { StairsShape } from './Shapes/StairsShape';
 import { ElevatorShape } from './Shapes/ElevatorShape';
-import { WallShape } from './Shapes/WallShape';
 import { SensorShape } from './Shapes/SensorShape';
-import { LedShape } from './Shapes/LedShape';
 import { ConnectorShape } from './Shapes/ConnectorShape';
 import { LabelShape } from './Shapes/LabelShape';
 import { BelowObjectOutline } from './Shapes/BelowObjectOutline';
@@ -90,6 +87,7 @@ function CanvasEditorComponent(props: Props) {
     drawingState,
     mousePos,
     handleCanvasClick,
+    handleCanvasDblClick,
     handleMouseMove: handlePenMouseMove,
     cancelDrawing,
   } = usePenDrawing(
@@ -138,6 +136,17 @@ function CanvasEditorComponent(props: Props) {
 
   const [isSpacePressed, setIsSpacePressed] = useState(false);
 
+  const [hoveredSensorId, setHoveredSensorId] = useState<string | null>(null);
+  const [localMousePos, setLocalMousePos] = useState<{ x: number; y: number } | null>(null);
+  const [isErasing, setIsErasing] = useState(false);
+  const [erasedIds, setErasedIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setHoveredSensorId(null);
+    setIsErasing(false);
+    setErasedIds(new Set());
+  }, [props.activeTool]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement;
@@ -166,7 +175,7 @@ function CanvasEditorComponent(props: Props) {
 
     const handleBlur = () => {
       setIsSpacePressed(false);
-      setDrawingState(null);
+      cancelDrawing();
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -231,49 +240,8 @@ function CanvasEditorComponent(props: Props) {
   }, [props.sensors]);
 
   const dangerRooms = useMemo(() => {
-    const rooms = new Set<string>();
-    const dangerPositions: { x: number; y: number }[] = [];
-
-    props.objects.forEach((obj) => {
-      if (obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp') {
-        if (dangerDeviceIds.has(obj.id)) {
-          dangerPositions.push({ x: obj.x, y: obj.y });
-        }
-      }
-    });
-
-    props.objects.forEach((obj) => {
-      if (obj.type === 'room') {
-        const isPolygon = obj.shapeType === 'polygon';
-        const pts = obj.points;
-
-        if (isPolygon && pts && pts.length >= 6) {
-          const poly: { x: number; y: number }[] = [];
-          for (let i = 0; i < pts.length; i += 2) {
-            poly.push({ x: obj.x + pts[i], y: obj.y + pts[i + 1] });
-          }
-          const hasDanger = dangerPositions.some((p) => isPointInPolygon(p.x, p.y, poly));
-          if (hasDanger) {
-            rooms.add(obj.id);
-          }
-        } else {
-          const rx = obj.x;
-          const ry = obj.y;
-          const rw = obj.width || 240;
-          const rh = obj.height || 140;
-
-          const hasDanger = dangerPositions.some(
-            (p) => p.x >= rx && p.x <= rx + rw && p.y >= ry && p.y <= ry + rh
-          );
-          if (hasDanger) {
-            rooms.add(obj.id);
-          }
-        }
-      }
-    });
-
-    return rooms;
-  }, [props.objects, dangerDeviceIds]);
+    return new Set<string>();
+  }, []);
 
   const safePathPoints = useMemo(() => {
     if (!props.safePath || props.safePath.length < 2) return null;
@@ -330,6 +298,54 @@ function CanvasEditorComponent(props: Props) {
     transformerRef.current.getLayer()?.batchDraw();
   }, [props.selectedIds, props.objects]);
 
+  const getSnappedSensorPointer = useCallback((pointerX: number, pointerY: number) => {
+    if (props.activeTool !== 'led_wire-pen') {
+      return { pointer: { x: pointerX, y: pointerY }, hoveredId: null };
+    }
+
+    const sensors = props.objects.filter(
+      (o) => o.type === 'sensor'
+    );
+
+    for (const s of sensors) {
+      const centerX = s.x + 22;
+      const centerY = s.y + 22;
+      const dist = Math.hypot(pointerX - centerX, pointerY - centerY);
+      if (dist < 24) {
+        return { pointer: { x: centerX, y: centerY }, hoveredId: s.id };
+      }
+    }
+
+    return { pointer: { x: pointerX, y: pointerY }, hoveredId: null };
+  }, [props.activeTool, props.objects]);
+
+  const getObjectIdsAtPointer = useCallback((stage: Konva.Stage, screenPos: { x: number; y: number }) => {
+    const ids = new Set<string>();
+    const offsets = [
+      { x: 0, y: 0 },
+      { x: -8, y: 0 },
+      { x: 8, y: 0 },
+      { x: 0, y: -8 },
+      { x: 0, y: 8 },
+    ];
+
+    for (const offset of offsets) {
+      const intersect = stage.getIntersection({ x: screenPos.x + offset.x, y: screenPos.y + offset.y });
+      if (intersect) {
+        let current: Konva.Container | Konva.Node | null = intersect;
+        while (current) {
+          const id = current.id();
+          if (id && props.objects.some((obj) => obj.id === id)) {
+            ids.add(id);
+            break;
+          }
+          current = current.getParent();
+        }
+      }
+    }
+    return Array.from(ids);
+  }, [props.objects]);
+
   function stagePointerToWorld() {
     const stage = stageRef.current;
     if (!stage) return null;
@@ -364,18 +380,42 @@ function CanvasEditorComponent(props: Props) {
 
     const isPanningAction = isSpacePressed || event.evt.button === 1;
 
+    // Eraser Tool click logic
+    if (props.editMode && props.activeTool === 'eraser' && event.evt.button === 0 && !isPanningAction) {
+      setIsErasing(true);
+      const stage = stageRef.current;
+      if (stage) {
+        const screenPointer = stage.getPointerPosition();
+        if (screenPointer) {
+          const hitIds = getObjectIdsAtPointer(stage, screenPointer);
+          if (hitIds.length > 0) {
+            setErasedIds(new Set(hitIds));
+          }
+        }
+      }
+      return;
+    }
+
     // Drawing Mode click logic (Pen Tool)
-    const isPenTool = props.activeTool === 'room-pen' || props.activeTool === 'floor_base-pen' || props.activeTool === 'led_wire-pen';
+    const isPenTool = props.activeTool === 'floor_base-pen' || props.activeTool === 'led_wire-pen' || props.activeTool === 'wall-pen';
     if (props.editMode && isPenTool && !isPanningAction) {
       const pointer = stagePointerToWorld();
       if (!pointer) return;
 
-      const handled = handleCanvasClick(pointer.x, pointer.y, event.evt.button);
+      let clickX = pointer.x;
+      let clickY = pointer.y;
+      if (props.activeTool === 'led_wire-pen') {
+        const { pointer: snappedPointer } = getSnappedSensorPointer(pointer.x, pointer.y);
+        clickX = snappedPointer.x;
+        clickY = snappedPointer.y;
+      }
+
+      const handled = handleCanvasClick(clickX, clickY, event.evt.button);
       if (handled) return;
     }
 
     // Adding objects on click if a tool is active (Edit Mode only), unless trying to pan
-    if (props.editMode && props.activeTool !== 'select' && !isPanningAction) {
+    if (props.editMode && props.activeTool !== 'select' && props.activeTool !== 'eraser' && !isPanningAction) {
       if (emptyArea) {
         const pointer = stagePointerToWorld();
         if (pointer) {
@@ -413,9 +453,38 @@ function CanvasEditorComponent(props: Props) {
       return;
     }
 
-    if (drawingState) {
-      const pointer = stagePointerToWorld();
-      if (pointer) handlePenMouseMove(pointer.x, pointer.y);
+    const pointer = stagePointerToWorld();
+    if (pointer) {
+      setLocalMousePos(pointer);
+
+      if (props.editMode && props.activeTool === 'eraser' && isErasing) {
+        const stage = stageRef.current;
+        if (stage) {
+          const screenPointer = stage.getPointerPosition();
+          if (screenPointer) {
+            const hitIds = getObjectIdsAtPointer(stage, screenPointer);
+            if (hitIds.length > 0) {
+              setErasedIds((prev) => {
+                const next = new Set(prev);
+                hitIds.forEach((id) => next.add(id));
+                return next;
+              });
+            }
+          }
+        }
+      } else if (props.activeTool === 'led_wire-pen') {
+        const { pointer: snappedPointer, hoveredId } = getSnappedSensorPointer(pointer.x, pointer.y);
+        setHoveredSensorId(hoveredId);
+        setLocalMousePos(snappedPointer);
+        if (drawingState) {
+          handlePenMouseMove(snappedPointer.x, snappedPointer.y);
+        }
+      } else {
+        setHoveredSensorId(null);
+        if (drawingState) {
+          handlePenMouseMove(pointer.x, pointer.y);
+        }
+      }
     }
   }
 
@@ -423,6 +492,23 @@ function CanvasEditorComponent(props: Props) {
     setIsPanning(false);
     setPanStart(null);
     setPanOrigin(null);
+
+    if (isErasing) {
+      setIsErasing(false);
+      if (erasedIds.size > 0) {
+        props.onContextAction('delete_multiple', JSON.stringify(Array.from(erasedIds)));
+      }
+      setErasedIds(new Set());
+    }
+  }
+
+  function handleDblClick(event: Konva.KonvaEventObject<MouseEvent>) {
+    if (props.editMode) {
+      const handled = handleCanvasDblClick();
+      if (handled) {
+        event.cancelBubble = true;
+      }
+    }
   }
 
   function handleDragOver(e: React.DragEvent) {
@@ -434,7 +520,7 @@ function CanvasEditorComponent(props: Props) {
     if (!props.editMode) return;
 
     const type = e.dataTransfer.getData('text/plain') as FloorPlanObject['type'];
-    if (!type) return;
+    if (!type || (type as string) === 'eraser') return;
 
     const stage = stageRef.current;
     if (!stage) return;
@@ -497,13 +583,31 @@ function CanvasEditorComponent(props: Props) {
     }
   }
 
-  // Layering helper: floor_base at bottom, connector at top
+  // Layering helper: sorted by visual hierarchy (floor_base at bottom, led_wire behind sensors, connector at top)
   const sortedObjects = useMemo(() => {
-    const bases = props.objects.filter((o) => o.type === 'floor_base');
-    const connectors = props.objects.filter((o) => o.type === 'connector');
-    const others = props.objects.filter((o) => o.type !== 'floor_base' && o.type !== 'connector');
-    return [...bases, ...others, ...connectors];
+    const order = [
+      'floor_base',
+      'led_wire',
+      'wall',
+      'stairs',
+      'elevator',
+      'exit',
+      'sensor',
+      'label',
+      'connector'
+    ];
+    return [...props.objects].sort((a, b) => {
+      const idxA = order.indexOf(a.type);
+      const idxB = order.indexOf(b.type);
+      const valA = idxA !== -1 ? idxA : 99;
+      const valB = idxB !== -1 ? idxB : 99;
+      return valA - valB;
+    });
   }, [props.objects]);
+
+  const visibleObjects = useMemo(() => {
+    return sortedObjects.filter((o) => !erasedIds.has(o.id));
+  }, [sortedObjects, erasedIds]);
 
   // Memoized render functions delegating to sub-components
   const renderBelowOutline = useCallback((object: FloorPlanObject) => {
@@ -514,9 +618,8 @@ function CanvasEditorComponent(props: Props) {
     if (object.visible === false || object.id === editingLabelId) return null;
 
     const selected = selectedIdSet.has(object.id);
-    const isRoomDanger = object.type === 'room' && dangerRooms.has(object.id);
-    const isSensorDanger = (object.type === 'mq2' || object.type === 'temp') && dangerDeviceIds.has(object.id);
-    const isSensorWarning = (object.type === 'mq2' || object.type === 'temp') && warningDeviceIds.has(object.id);
+    const isSensorDanger = object.type === 'sensor' && dangerDeviceIds.has(object.id);
+    const isSensorWarning = object.type === 'sensor' && warningDeviceIds.has(object.id);
     const sensorReading = sensorValues.get(object.id);
 
     const width = object.width || getDefaultSize(object.type).width;
@@ -534,7 +637,7 @@ function CanvasEditorComponent(props: Props) {
         if (isSpacePressed || event.evt.button === 1) return;
         event.cancelBubble = true;
         props.onSelect(object.id, event.evt.shiftKey);
-        const isPenTool = props.activeTool === 'room-pen' || props.activeTool === 'floor_base-pen';
+        const isPenTool = props.activeTool === 'floor_base-pen';
         if (isPenTool) {
           props.onContextAction('select', '');
         }
@@ -542,7 +645,7 @@ function CanvasEditorComponent(props: Props) {
       onTap: (event: Konva.KonvaEventObject<Event>) => {
         event.cancelBubble = true;
         props.onSelect(object.id, false);
-        const isPenTool = props.activeTool === 'room-pen' || props.activeTool === 'floor_base-pen';
+        const isPenTool = props.activeTool === 'floor_base-pen';
         if (isPenTool) {
           props.onContextAction('select', '');
         }
@@ -634,27 +737,6 @@ function CanvasEditorComponent(props: Props) {
             commonProps={commonProps}
           />
         );
-      case 'room':
-        return (
-          <RoomShape
-            key={object.id}
-            object={object}
-            selected={selected}
-            isDark={isDark}
-            isRoomDanger={isRoomDanger}
-            commonProps={commonProps}
-          />
-        );
-      case 'door':
-        return (
-          <DoorShape
-            key={object.id}
-            object={object}
-            selected={selected}
-            isDark={isDark}
-            commonProps={commonProps}
-          />
-        );
       case 'exit':
         return (
           <ExitShape
@@ -684,19 +766,7 @@ function CanvasEditorComponent(props: Props) {
             commonProps={commonProps}
           />
         );
-      case 'wall':
-        return (
-          <WallShape
-            key={object.id}
-            object={object}
-            selected={selected}
-            isDark={isDark}
-            commonProps={commonProps}
-          />
-        );
       case 'sensor':
-      case 'mq2':
-      case 'temp':
         return (
           <SensorShape
             key={object.id}
@@ -707,6 +777,7 @@ function CanvasEditorComponent(props: Props) {
             isWarning={isSensorWarning}
             reading={sensorReading}
             commonProps={commonProps}
+            isHovered={hoveredSensorId === object.id}
           />
         );
       case 'led_wire':
@@ -720,12 +791,13 @@ function CanvasEditorComponent(props: Props) {
             commonProps={commonProps}
           />
         );
-      case 'led':
+      case 'wall':
         return (
-          <LedShape
+          <WallShape
             key={object.id}
             object={object}
             selected={selected}
+            isDark={isDark}
             commonProps={commonProps}
           />
         );
@@ -772,6 +844,7 @@ function CanvasEditorComponent(props: Props) {
     objectById,
     wallObjects,
     props.objects,
+    hoveredSensorId,
   ]);
 
   const hasSafePathAnimation = Boolean(safePathPoints) || Boolean(props.safePath && props.safePath.length > 0);
@@ -800,15 +873,10 @@ function CanvasEditorComponent(props: Props) {
         (node as any).dashOffset(dashOffset);
       });
 
-      // 2. Animate blinking danger rooms & warning sensors (500ms intervals)
+      // 2. Animate blinking warning sensors (500ms intervals)
       const isAlt = Math.floor(time / 500) % 2 === 0;
       if (!hasStatusAnimation || isAlt === previousBlinkPhase) return;
       previousBlinkPhase = isAlt;
-
-      const dangerRoomsNodes = stage.find('.danger-blink');
-      dangerRoomsNodes.forEach((node) => {
-        (node as any).fill(isAlt ? 'rgba(239, 68, 68, 0.45)' : 'rgba(239, 68, 68, 0.25)');
-      });
 
       const dangerSensors = stage.find('.danger-blink-sensor');
       dangerSensors.forEach((node) => {
@@ -832,7 +900,7 @@ function CanvasEditorComponent(props: Props) {
       ref={wrapperRef}
       className="relative h-full w-full overflow-hidden bg-slate-950"
       style={{
-        cursor: isPanning ? 'grabbing' : isSpacePressed ? 'grab' : 'default',
+        cursor: isPanning ? 'grabbing' : isSpacePressed ? 'grab' : props.activeTool === 'eraser' ? 'none' : 'default',
       }}
       onMouseLeave={handleMouseUp}
       onDragOver={handleDragOver}
@@ -846,6 +914,7 @@ function CanvasEditorComponent(props: Props) {
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onWheel={handleWheel}
+        onDblClick={handleDblClick}
       >
         {/* Workspace Canvas (Drawing sheet background) */}
         <Layer>
@@ -882,14 +951,14 @@ function CanvasEditorComponent(props: Props) {
 
         <Layer>
           <Group x={props.position.x} y={props.position.y} scaleX={props.scale} scaleY={props.scale}>
-            
+
             {/* Render underlay of floor below */}
             {props.showBelowBaseline && props.belowObjects && props.belowObjects
-              .filter((obj) => !['mq2', 'temp', 'led', 'connector'].includes(obj.type))
+              .filter((obj) => !['mq2', 'temp', 'led', 'connector', 'room', 'door'].includes(obj.type))
               .map(renderBelowOutline)}
 
             {/* Render floor plan objects (Base platform at the bottom) */}
-            {sortedObjects.map(renderPlanObject)}
+            {visibleObjects.map(renderPlanObject)}
 
             {/* Pen Tool drawing preview */}
             {drawingState && mousePos && (
@@ -901,11 +970,11 @@ function CanvasEditorComponent(props: Props) {
                     mousePos.y - drawingState.startY,
                   ]}
                   stroke="#3b82f6"
-                  strokeWidth={drawingState.type === 'led_wire' ? 3.5 : 2}
+                  strokeWidth={drawingState.type === 'led_wire' || drawingState.type === 'wall' ? 3.5 : 2}
                   dash={[4, 4]}
                 />
                 {/* Closed polygon start indicator */}
-                {drawingState.type !== 'led_wire' && drawingState.points.length >= 6 && Math.hypot(mousePos.x - drawingState.startX, mousePos.y - drawingState.startY) < 12 && (
+                {drawingState.type !== 'led_wire' && drawingState.type !== 'wall' && drawingState.points.length >= 6 && Math.hypot(mousePos.x - drawingState.startX, mousePos.y - drawingState.startY) < 12 && (
                   <Circle
                     x={0}
                     y={0}
@@ -916,7 +985,7 @@ function CanvasEditorComponent(props: Props) {
                   />
                 )}
                 {/* Open path node connector snap preview indicator */}
-                {drawingState.type === 'led_wire' && (
+                {(drawingState.type === 'led_wire' || drawingState.type === 'wall') && (
                   <Circle
                     x={mousePos.x - drawingState.startX}
                     y={mousePos.y - drawingState.startY}
@@ -925,6 +994,19 @@ function CanvasEditorComponent(props: Props) {
                   />
                 )}
               </Group>
+            )}
+
+            {/* Eraser Brush Circle Preview */}
+            {props.editMode && props.activeTool === 'eraser' && localMousePos && (
+              <Circle
+                x={localMousePos.x}
+                y={localMousePos.y}
+                radius={12}
+                fill={isDark ? 'rgba(239, 68, 68, 0.25)' : 'rgba(239, 68, 68, 0.15)'}
+                stroke="#ef4444"
+                strokeWidth={1.5}
+                listening={false}
+              />
             )}
 
             {/* Polygon vertex editing handles */}
@@ -986,15 +1068,15 @@ function CanvasEditorComponent(props: Props) {
                 enabledAnchors={
                   resizeEnabled
                     ? [
-                        'top-left',
-                        'top-center',
-                        'top-right',
-                        'middle-right',
-                        'bottom-right',
-                        'bottom-center',
-                        'bottom-left',
-                        'middle-left',
-                      ]
+                      'top-left',
+                      'top-center',
+                      'top-right',
+                      'middle-right',
+                      'bottom-right',
+                      'bottom-center',
+                      'bottom-left',
+                      'middle-left',
+                    ]
                     : []
                 }
                 boundBoxFunc={(oldBox, newBox) =>

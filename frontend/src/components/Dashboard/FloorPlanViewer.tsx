@@ -44,6 +44,7 @@ export function FloorPlanViewer({
   const [panOrigin, setPanOrigin] = useState({ x: 0, y: 0 });
 
   const safePathLineRef = useRef<Konva.Line | null>(null);
+  const hasDraggedRef = useRef(false);
 
   const gridPattern = useMemo(() => {
     if (typeof window === 'undefined') return null;
@@ -174,17 +175,19 @@ export function FloorPlanViewer({
 
   // Mouse drag panning
   const handleMouseDown = (e: any) => {
-    if (e.target === e.target.getStage() || e.target.hasName('workspace-empty')) {
-      setIsPanning(true);
-      setPanStart({ x: e.evt.clientX, y: e.evt.clientY });
-      setPanOrigin({ x: position.x, y: position.y });
-    }
+    setIsPanning(true);
+    hasDraggedRef.current = false;
+    setPanStart({ x: e.evt.clientX, y: e.evt.clientY });
+    setPanOrigin({ x: position.x, y: position.y });
   };
 
   const handleMouseMove = (e: any) => {
     if (!isPanning) return;
     const dx = e.evt.clientX - panStart.x;
     const dy = e.evt.clientY - panStart.y;
+    if (Math.hypot(dx, dy) > 3) {
+      hasDraggedRef.current = true;
+    }
     setPosition({
       x: panOrigin.x + dx,
       y: panOrigin.y + dy,
@@ -370,11 +373,13 @@ export function FloorPlanViewer({
       y: obj.y,
       rotation: obj.rotation || 0,
       onClick: () => {
+        if (hasDraggedRef.current) return;
         if (obj.type === 'room' && onRoomSelect) {
           onRoomSelect(obj.id);
         }
       },
       onTap: () => {
+        if (hasDraggedRef.current) return;
         if (obj.type === 'room' && onRoomSelect) {
           onRoomSelect(obj.id);
         }
@@ -567,6 +572,31 @@ export function FloorPlanViewer({
     }
 
     if (obj.type === 'wall') {
+      const points = obj.points || [];
+      if (obj.shapeType === 'polygon' && points.length > 0) {
+        const strokeColor = obj.color || (isDark ? '#64748b' : '#94a3b8');
+        return (
+          <Group {...commonProps}>
+            {/* Outer border/casing line for visual definition */}
+            <Line
+              points={points}
+              stroke={isDark ? '#0f172a' : '#cbd5e1'}
+              strokeWidth={8}
+              lineJoin="round"
+              lineCap="round"
+              listening={false}
+            />
+            {/* Main core wall line */}
+            <Line
+              points={points}
+              stroke={strokeColor}
+              strokeWidth={5}
+              lineJoin="round"
+              lineCap="round"
+            />
+          </Group>
+        );
+      }
       return (
         <Group {...commonProps}>
           <Rect
@@ -925,7 +955,7 @@ export function FloorPlanViewer({
             : 'bg-white border-slate-200 text-slate-600'
         }`}
       >
-        <span>🖱️ Kéo vùng trống để di chuyển • Cuộn chuột để phóng to/thu nhỏ</span>
+        <span>🖱️ Kéo sơ đồ để di chuyển • Cuộn chuột để phóng to/thu nhỏ</span>
         {selectedStartRoomId && (
           <span className={`px-2 py-0.5 rounded font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30`}>
             📍 Điểm chọn: {objects.find(o => o.id === selectedStartRoomId)?.name}

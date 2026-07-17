@@ -190,17 +190,16 @@ export const BelowObjectOutline: React.FC<BelowObjectOutlineProps> = React.memo(
   }
 
   if (object.type === 'wall') {
-    const wallColor = isDark ? 'rgba(148, 163, 184, 0.45)' : 'rgba(100, 116, 139, 0.3)';
+    const isPolygon = object.shapeType === 'polygon';
+    const pts = isPolygon ? object.points || [] : [0, 0, width, 0, width, height, 0, height];
     return (
       <Group {...commonBelowProps}>
-        <Rect
-          width={width}
-          height={height}
+        <Line
+          points={pts}
+          closed={!isPolygon}
           stroke={strokeColor}
-          strokeWidth={strokeWidth}
+          strokeWidth={isPolygon ? 3.5 : strokeWidth}
           dash={dash}
-          cornerRadius={2}
-          fill={wallColor}
         />
       </Group>
     );

@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { FloorPlanObject } from '../types/editor';
 import { createNewObject } from '../data/initialMockData';
 
-export type PenDrawingType = 'floor_base' | 'room' | 'led_wire';
+export type PenDrawingType = 'floor_base' | 'led_wire' | 'wall';
 
 export interface DrawingState {
   type: PenDrawingType;
@@ -38,23 +38,39 @@ export function usePenDrawing(
       return;
     }
 
+    let points = [...drawingState.points];
+    const baseType = drawingState.type;
+
+    // For open lines (like led_wire), double-clicks append an extra point at the end.
+    // Let's remove the last point if it is duplicate or very close to the previous one.
+    const isOpenLine = baseType === 'led_wire' || baseType === 'wall';
+    if (isOpenLine && points.length >= 6) {
+      const len = points.length;
+      const lx = points[len - 2];
+      const ly = points[len - 1];
+      const px = points[len - 4];
+      const py = points[len - 3];
+      if (Math.hypot(lx - px, ly - py) < 15) {
+        points = points.slice(0, len - 2);
+      }
+    }
+
     // Find bounding box to make points local to the object's origin (minX, minY)
     let minX = Infinity;
     let minY = Infinity;
-    for (let i = 0; i < drawingState.points.length; i += 2) {
-      const px = drawingState.startX + drawingState.points[i];
-      const py = drawingState.startY + drawingState.points[i + 1];
+    for (let i = 0; i < points.length; i += 2) {
+      const px = drawingState.startX + points[i];
+      const py = drawingState.startY + points[i + 1];
       minX = Math.min(minX, px);
       minY = Math.min(minY, py);
     }
 
     const relativePoints: number[] = [];
-    for (let i = 0; i < drawingState.points.length; i += 2) {
-      relativePoints.push(drawingState.startX + drawingState.points[i] - minX);
-      relativePoints.push(drawingState.startY + drawingState.points[i + 1] - minY);
+    for (let i = 0; i < points.length; i += 2) {
+      relativePoints.push(drawingState.startX + points[i] - minX);
+      relativePoints.push(drawingState.startY + points[i + 1] - minY);
     }
 
-    const baseType = drawingState.type;
     const newObj = createNewObject(baseType + '-pen', minX, minY);
     newObj.points = relativePoints;
     
@@ -74,17 +90,19 @@ export function usePenDrawing(
   }, [drawingState, cancelDrawing, onAddCustomObject, onAddObject, onSelect, onCancel]);
 
   const handleCanvasClick = useCallback((pointerX: number, pointerY: number, button = 0) => {
-    const isPenTool = activeTool === 'room-pen' || activeTool === 'floor_base-pen' || activeTool === 'led_wire-pen';
+    const isPenTool = activeTool === 'floor_base-pen' || activeTool === 'led_wire-pen' || activeTool === 'wall-pen';
     if (!isPenTool) return false;
 
     const mapToolType: PenDrawingType = 
-      activeTool === 'room-pen' ? 'room' : 
-      activeTool === 'floor_base-pen' ? 'floor_base' : 'led_wire';
+      activeTool === 'floor_base-pen' ? 'floor_base' : 
+      activeTool === 'led_wire-pen' ? 'led_wire' : 'wall';
+
+    const isOpenLine = mapToolType === 'led_wire' || mapToolType === 'wall';
 
     if (button === 2) {
-      // Right click finishes drawing (very handy for open lines like led_wire)
+      // Right click finishes drawing (very handy for open lines like led_wire/wire)
       if (drawingState) {
-        finishDrawing(mapToolType !== 'led_wire');
+        finishDrawing(!isOpenLine);
         return true;
       }
       return false;
@@ -101,14 +119,14 @@ export function usePenDrawing(
       const dx = pointerX - drawingState.startX;
       const dy = pointerY - drawingState.startY;
 
-      if (mapToolType === 'led_wire') {
+      if (isOpenLine) {
         const len = drawingState.points.length;
         const lx = drawingState.points[len - 2];
         const ly = drawingState.points[len - 1];
         const distToLast = Math.hypot(dx - lx, dy - ly);
         
-        // Clicking very close to the last point acts as a finish command
-        if (distToLast < 10 && len >= 4) {
+        // Clicking close to the last point finishes drawing (22px radius is user friendly)
+        if (distToLast < 22 && len >= 4) {
           finishDrawing(false);
           return true;
         }
@@ -120,7 +138,7 @@ export function usePenDrawing(
       } else {
         // Closed polygons
         const distToStart = Math.hypot(dx, dy);
-        if (distToStart < 12 && drawingState.points.length >= 6) {
+        if (distToStart < 22 && drawingState.points.length >= 6) {
           finishDrawing(true);
           return true;
         }
@@ -134,33 +152,79 @@ export function usePenDrawing(
     return true;
   }, [activeTool, drawingState, finishDrawing]);
 
+  const handleCanvasDblClick = useCallback(() => {
+    if (drawingState) {
+      const isOpenLine = drawingState.type === 'led_wire' || drawingState.type === 'wall';
+      finishDrawing(!isOpenLine);
+      return true;
+    }
+    return false;
+  }, [drawingState, finishDrawing]);
+
+  const undoLastPoint = useCallback(() => {
+    if (!drawingState) return;
+    const len = drawingState.points.length;
+    if (len <= 2) {
+      cancelDrawing();
+    } else {
+      setDrawingState({
+        ...drawingState,
+        points: drawingState.points.slice(0, len - 2),
+      });
+    }
+  }, [drawingState, cancelDrawing]);
+
   const handleMouseMove = useCallback((pointerX: number, pointerY: number) => {
     if (drawingState) {
       setMousePos({ x: pointerX, y: pointerY });
     }
   }, [drawingState]);
 
+  // Escape key cancels, Enter key finishes, Ctrl+Z undos last point
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!drawingState) return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        undoLastPoint();
+        return;
+      }
       if (e.key === 'Escape') {
         cancelDrawing();
         e.preventDefault();
       } else if (e.key === 'Enter') {
-        finishDrawing(drawingState.type !== 'led_wire');
+        const isOpenLine = drawingState.type === 'led_wire' || drawingState.type === 'wall';
+        finishDrawing(!isOpenLine);
         e.preventDefault();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [drawingState, cancelDrawing, finishDrawing]);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [drawingState, cancelDrawing, finishDrawing, undoLastPoint]);
+
+  // Auto-finish or cancel if active tool switches away from pen tools
+  useEffect(() => {
+    const isPenTool = activeTool === 'floor_base-pen' || activeTool === 'led_wire-pen' || activeTool === 'wall-pen';
+    if (!isPenTool && drawingState) {
+      const isOpenLine = drawingState.type === 'led_wire' || drawingState.type === 'wall';
+      const minCoords = isOpenLine ? 4 : 6;
+      if (drawingState.points.length >= minCoords) {
+        finishDrawing(!isOpenLine);
+      } else {
+        cancelDrawing();
+      }
+    }
+  }, [activeTool, drawingState, finishDrawing, cancelDrawing]);
 
   return {
     drawingState,
     mousePos,
     handleCanvasClick,
+    handleCanvasDblClick,
     handleMouseMove,
     cancelDrawing,
     finishDrawing,
+    undoLastPoint,
   };
 }

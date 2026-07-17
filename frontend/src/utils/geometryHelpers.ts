@@ -18,13 +18,12 @@ export function getDefaultSize(type: FloorPlanObject['type']) {
       return { width: 80, height: 60 };
     case 'elevator':
       return { width: 60, height: 60 };
-    case 'wall':
-      return { width: 160, height: 16 };
     case 'sensor':
     case 'mq2':
     case 'temp':
       return { width: 36, height: 36 };
     case 'led_wire':
+    case 'wall':
       return { width: 40, height: 40 };
     case 'led':
       return { width: 16, height: 16 };
@@ -76,7 +75,7 @@ export function isPointInPolygon(px: number, py: number, poly: Point[]): boolean
     const xi = poly[i].x, yi = poly[i].y;
     const xj = poly[j].x, yj = poly[j].y;
     const intersect = ((yi > py) !== (yj > py))
-        && (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+      && (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
     if (intersect) inside = !inside;
   }
   return inside;
@@ -128,6 +127,18 @@ export function connectorIntersectsWall(
     x: toNode.x + (toNode.width || toSize.width) / 2,
     y: toNode.y + (toNode.height || toSize.height) / 2,
   };
+
+  if (wall.shapeType === 'polygon' && wall.points && wall.points.length >= 4) {
+    const pts = wall.points;
+    for (let i = 0; i < pts.length - 2; i += 2) {
+      const C = { x: wall.x + pts[i], y: wall.y + pts[i + 1] };
+      const D = { x: wall.x + pts[i + 2], y: wall.y + pts[i + 3] };
+      if (intersectSegments(A, B, C, D)) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   const corners = getRotatedCorners(wall);
 

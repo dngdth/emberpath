@@ -1,5 +1,5 @@
 import React from 'react';
-import { Group, Rect } from 'react-konva';
+import { Group, Rect, Line } from 'react-konva';
 import { FloorPlanObject } from '../../../types/editor';
 
 interface WallShapeProps {
@@ -15,9 +15,53 @@ export const WallShape: React.FC<WallShapeProps> = React.memo(({
   isDark,
   commonProps,
 }) => {
+  const points = object.points || [];
+  const fill = '#64748b';
+
+  // Polyline wall drawing
+  if (object.shapeType === 'polygon' && points.length > 0) {
+    const strokeColor = selected
+      ? '#3b82f6'
+      : object.color || (isDark ? '#64748b' : '#94a3b8');
+
+    return (
+      <Group {...commonProps}>
+        {/* Highlight glow layer on selection */}
+        {selected && (
+          <Line
+            points={points}
+            stroke="#3b82f6"
+            strokeWidth={10}
+            lineJoin="round"
+            lineCap="round"
+            opacity={0.35}
+            listening={false}
+          />
+        )}
+        {/* Outer border/casing line for visual definition */}
+        <Line
+          points={points}
+          stroke={isDark ? '#0f172a' : '#cbd5e1'}
+          strokeWidth={8}
+          lineJoin="round"
+          lineCap="round"
+          listening={false}
+        />
+        {/* Main core wall line */}
+        <Line
+          points={points}
+          stroke={strokeColor}
+          strokeWidth={5}
+          lineJoin="round"
+          lineCap="round"
+        />
+      </Group>
+    );
+  }
+
+  // Fallback for old rectangular walls
   const width = object.width || 120;
   const height = object.height || 16;
-  const fill = '#64748b';
 
   return (
     <Group {...commonProps}>

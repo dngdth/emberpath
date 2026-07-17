@@ -506,6 +506,17 @@ export function FloorEditorPage() {
       return;
     }
 
+    if (action === 'delete_multiple') {
+      try {
+        const ids = JSON.parse(objectId) as string[];
+        editor.removeObjects(ids);
+      } catch (err) {
+        editor.removeObjects([objectId]);
+      }
+      selection.clearSelection();
+      return;
+    }
+
     const object = history.state.find((item) => item.id === objectId);
     if (!object) return;
 
@@ -678,6 +689,8 @@ export function FloorEditorPage() {
         handleImport={handleImport}
         fileMenuRef={fileMenuRef}
         clearSelection={handleClearSelection}
+        activeTool={editor.activeTool}
+        setActiveTool={editor.setActiveTool}
       />
 
       {/* 2. FULL CANVAS WORKSPACE WITH FLOATING SIDEBARS (FIGMA LAYOUT) */}

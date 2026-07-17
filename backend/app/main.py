@@ -1,7 +1,6 @@
-import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
@@ -14,6 +13,7 @@ from app.auth.dependencies import get_current_user
 from app.auth.security import decode_token
 from app.core.config import settings
 from app.db.base import Base
+from app.db.schema import ensure_sqlite_columns
 from app.db.session import SessionLocal, engine
 from app.models.user import User
 from app.seed.seed_data import seed_database
@@ -24,23 +24,9 @@ from app.services.websocket_manager import ws_manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    ensure_sqlite_columns(engine)
     db = SessionLocal()
     try:
-        from sqlalchemy import text
-        try:
-            db.execute(text("SELECT canvas_width, canvas_height FROM floor_plans LIMIT 1"))
-        except Exception:
-            db.rollback()
-            try:
-                db.execute(text("ALTER TABLE floor_plans ADD COLUMN canvas_width FLOAT DEFAULT 1600.0"))
-            except Exception:
-                pass
-            try:
-                db.execute(text("ALTER TABLE floor_plans ADD COLUMN canvas_height FLOAT DEFAULT 1000.0"))
-            except Exception:
-                pass
-            db.commit()
-
         if settings.seed_demo_data:
             seed_database(db)
     finally:

@@ -57,6 +57,9 @@ export function CanvasEditor(props: Props) {
   const stageRef = useRef<Konva.Stage | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const guideFrameRef = useRef<number | null>(null);
+  const pendingGuideTargetRef = useRef<FloorPlanObject | null>(null);
+  const lastGuideUpdateRef = useRef(0);
 
   const { darkMode } = useThemeStore();
   const isDark = darkMode;
@@ -162,6 +165,15 @@ export function CanvasEditor(props: Props) {
   const selectedObjects = useMemo(
     () => props.objects.filter((object) => props.selectedIds.includes(object.id)),
     [props.objects, props.selectedIds],
+  );
+  const selectedIdSet = useMemo(() => new Set(props.selectedIds), [props.selectedIds]);
+  const objectById = useMemo(
+    () => new Map(props.objects.map((object) => [object.id, object])),
+    [props.objects],
+  );
+  const wallObjects = useMemo(
+    () => props.objects.filter((object) => object.type === 'wall'),
+    [props.objects],
   );
 
   const resizeEnabled = selectedObjects.length === 1 && isResizable(selectedObjects[0].type);
@@ -271,6 +283,10 @@ export function CanvasEditor(props: Props) {
 
     return () => observer.disconnect();
   }, [props.onViewportChange]);
+
+  useEffect(() => () => {
+    if (guideFrameRef.current !== null) cancelAnimationFrame(guideFrameRef.current);
+  }, []);
 
   useEffect(() => {
     if (!transformerRef.current || !stageRef.current) return;
@@ -425,9 +441,9 @@ export function CanvasEditor(props: Props) {
       return;
     }
 
-    const pointer = stagePointerToWorld();
-    if (pointer) {
-      setMousePos(pointer);
+    if (drawingState) {
+      const pointer = stagePointerToWorld();
+      if (pointer) setMousePos(pointer);
     }
   }
 
@@ -757,7 +773,7 @@ export function CanvasEditor(props: Props) {
   function renderObject(object: FloorPlanObject) {
     if (object.visible === false || object.id === editingLabelId) return null;
 
-    const selected = props.selectedIds.includes(object.id);
+    const selected = selectedIdSet.has(object.id);
     const width = object.width || getDefaultSize(object.type).width;
     const height = object.height || getDefaultSize(object.type).height;
 
@@ -830,11 +846,22 @@ export function CanvasEditor(props: Props) {
       },
       onDragMove: (event: Konva.KonvaEventObject<DragEvent>) => {
         const next = { x: event.target.x(), y: event.target.y() };
-        setGuides(getGuideLines({ ...object, ...next }, props.objects));
+        pendingGuideTargetRef.current = { ...object, ...next };
+        if (guideFrameRef.current === null && performance.now() - lastGuideUpdateRef.current >= 32) {
+          guideFrameRef.current = requestAnimationFrame(() => {
+            guideFrameRef.current = null;
+            lastGuideUpdateRef.current = performance.now();
+            const target = pendingGuideTargetRef.current;
+            if (target) setGuides(getGuideLines(target, props.objects));
+          });
+        }
       },
       onDragEnd: (event: Konva.KonvaEventObject<DragEvent>) => {
         const snapped = snapPosition(event.target.x(), event.target.y(), props.snapEnabled);
         props.onUpdateObject(object.id, snapped);
+        if (guideFrameRef.current !== null) cancelAnimationFrame(guideFrameRef.current);
+        guideFrameRef.current = null;
+        pendingGuideTargetRef.current = null;
         setGuides([]);
       },
       onTransformEnd: (event: Konva.KonvaEventObject<Event>) => {
@@ -881,6 +908,7 @@ export function CanvasEditor(props: Props) {
           </Group>
           {/* Custom outer frame stroke */}
           <Line
+            id={isPolygon ? `${object.id}-polygon` : undefined}
             points={pts}
             closed={true}
             stroke={selected ? '#3b82f6' : isDark ? '#475569' : '#cbd5e1'}
@@ -906,6 +934,7 @@ export function CanvasEditor(props: Props) {
         <Group {...commonProps}>
           {object.shapeType === 'polygon' ? (
             <Line
+              id={`${object.id}-polygon`}
               name={isRoomDanger ? "danger-blink" : undefined}
               points={object.points || []}
               closed={true}
@@ -1177,8 +1206,8 @@ export function CanvasEditor(props: Props) {
     }
 
     if (object.type === 'connector') {
-      const fromNode = props.objects.find((o) => o.id === object.fromNodeId);
-      const toNode = props.objects.find((o) => o.id === object.toNodeId);
+      const fromNode = object.fromNodeId ? objectById.get(object.fromNodeId) : undefined;
+      const toNode = object.toNodeId ? objectById.get(object.toNodeId) : undefined;
       if (!fromNode || !toNode) return null;
 
       const fromSize = getDefaultSize(fromNode.type);
@@ -1190,9 +1219,7 @@ export function CanvasEditor(props: Props) {
       const toY = toNode.y + (toNode.height || toSize.height) / 2;
 
       // Realtime wall collision check
-      const intersectsWall = props.objects.some(
-        (obj) => obj.type === 'wall' && connectorIntersectsWall(fromNode, toNode, obj)
-      );
+      const intersectsWall = wallObjects.some((wall) => connectorIntersectsWall(fromNode, toNode, wall));
 
       return (
         <Group {...commonProps} x={0} y={0}>
@@ -1232,11 +1259,15 @@ export function CanvasEditor(props: Props) {
     );
   }
 
+  const hasSafePathAnimation = Boolean(safePathPoints);
+  const hasStatusAnimation = dangerRooms.size > 0 || dangerDeviceIds.size > 0 || warningDeviceIds.size > 0;
+
   useEffect(() => {
     const stage = stageRef.current;
-    if (!stage) return;
+    if (!stage || (!hasSafePathAnimation && !hasStatusAnimation)) return;
 
     let dashOffset = 0;
+    let previousBlinkPhase: boolean | null = null;
 
     const anim = new Konva.Animation((frame) => {
       if (!frame) return;
@@ -1251,6 +1282,8 @@ export function CanvasEditor(props: Props) {
 
       // 2. Animate blinking danger rooms & warning sensors (500ms intervals)
       const isAlt = Math.floor(time / 500) % 2 === 0;
+      if (!hasStatusAnimation || isAlt === previousBlinkPhase) return;
+      previousBlinkPhase = isAlt;
 
       const dangerRoomsNodes = stage.find('.danger-blink');
       dangerRoomsNodes.forEach((node) => {
@@ -1272,7 +1305,7 @@ export function CanvasEditor(props: Props) {
     return () => {
       anim.stop();
     };
-  }, [props.objects, dangerRooms, safePathPoints]);
+  }, [hasSafePathAnimation, hasStatusAnimation]);
 
   return (
     <div
@@ -1389,12 +1422,14 @@ export function CanvasEditor(props: Props) {
                         strokeWidth={2}
                         draggable
                         onDragMove={(e) => {
-                          const newVx = e.target.x();
-                          const newVy = e.target.y();
                           const nextPoints = [...pts];
-                          nextPoints[idx] = newVx;
-                          nextPoints[idx + 1] = newVy;
-                          props.onUpdateObject(targetObj.id, { points: nextPoints });
+                          nextPoints[idx] = e.target.x();
+                          nextPoints[idx + 1] = e.target.y();
+                          const shape = stageRef.current?.findOne(`#${targetObj.id}-polygon`);
+                          if (shape instanceof Konva.Line) {
+                            shape.points(nextPoints);
+                            shape.getLayer()?.batchDraw();
+                          }
                         }}
                         onDragEnd={(e) => {
                           const newVx = e.target.x();

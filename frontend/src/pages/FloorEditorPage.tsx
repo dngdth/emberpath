@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
-import api from '../utils/api';
+import { floorsApi } from '../services/backend';
 import { useAuthStore } from '../store/authStore';
 import { useThemeStore } from '../store/themeStore';
 import { CanvasEditor } from '../components/MapEditor/CanvasEditor';
@@ -15,7 +15,7 @@ import { useSelection } from '../hooks/useSelection';
 import { useZoomPan } from '../hooks/useZoomPan';
 import { useRealtimeSensors } from '../hooks/useRealtimeSensors';
 import { exportPlanToJson, importPlanFromJson } from '../utils/serialization';
-import { FloorItem, FloorPlanObject, FloorPlanResponse, ObjectType } from '../types/editor';
+import { FloorItem, FloorPlanObject, ObjectType } from '../types/editor';
 import {
   Layers,
   ArrowLeft,
@@ -143,7 +143,7 @@ export function FloorEditorPage() {
     // Delay slightly to let React finish batching the state updates
     setTimeout(async () => {
       try {
-        await api.put(`/floors/${activeFloorId}/plan`, {
+        await floorsApi.savePlan(activeFloorId, {
           objects: objectsRef.current,
           canvas_width: canvasWidthRef.current,
           canvas_height: canvasHeightRef.current,
@@ -194,9 +194,9 @@ export function FloorEditorPage() {
   // Fetch plan of floor below when active floor changes
   useEffect(() => {
     if (floorBelow) {
-      api.get<FloorPlanResponse>(`/floors/${floorBelow.id}/plan`)
-        .then((res) => {
-          setBelowObjects(res.data.objects);
+      floorsApi.getPlan(floorBelow.id)
+        .then((plan) => {
+          setBelowObjects(plan.objects);
         })
         .catch((err) => {
           console.error('Failed to load floor below plan', err);
@@ -347,9 +347,9 @@ export function FloorEditorPage() {
 
     const dangerRoom = history.state.find((o) => o.type === 'room' && dangerRooms.has(o.id));
     if (dangerRoom && activeFloorId) {
-      api.get<string[]>(`/floors/${activeFloorId}/path?start_node_id=${dangerRoom.id}&end_node_id=${exitNode.id}`)
-        .then(({ data }) => {
-          setSafePath(data);
+      floorsApi.findPath(activeFloorId, dangerRoom.id, exitNode.id)
+        .then((path) => {
+          setSafePath(path);
         })
         .catch(() => {
           // Fallback route
@@ -369,7 +369,7 @@ export function FloorEditorPage() {
   async function loadFloors() {
     setLoading(true);
     try {
-      const { data } = await api.get<FloorItem[]>('/floors');
+      const data = await floorsApi.list();
       setFloors(data);
       setActiveFloorId((current) => current ?? data[0]?.id ?? null);
     } finally {
@@ -381,7 +381,7 @@ export function FloorEditorPage() {
   async function loadPlan(floorId: number) {
     setLoading(true);
     try {
-      const { data } = await api.get<FloorPlanResponse>(`/floors/${floorId}/plan`);
+      const data = await floorsApi.getPlan(floorId);
       setCanvasWidth(data.canvas_width ?? 1600);
       setCanvasHeight(data.canvas_height ?? 1000);
       setCanvasShape(data.canvas_shape ?? 'rect');
@@ -411,7 +411,7 @@ export function FloorEditorPage() {
   async function confirmDeleteFloor() {
     if (!floorToDelete) return;
     try {
-      await api.delete(`/floors/${floorToDelete.id}`);
+      await floorsApi.remove(floorToDelete.id);
       setFloors((current) => current.filter((f) => f.id !== floorToDelete.id));
       if (activeFloorId === floorToDelete.id) {
         const remaining = floors.filter((f) => f.id !== floorToDelete.id);
@@ -439,7 +439,7 @@ export function FloorEditorPage() {
   async function handleSaveFloorName(name: string) {
     if (floorToRename) {
       try {
-        const { data } = await api.patch<FloorItem>(`/floors/${floorToRename.id}`, { name });
+        const data = await floorsApi.rename(floorToRename.id, name);
         setFloors((current) => current.map((f) => (f.id === floorToRename.id ? data : f)));
         setToast('Đã đổi tên tầng thành công');
       } catch (err) {
@@ -447,7 +447,7 @@ export function FloorEditorPage() {
       }
     } else {
       try {
-        const { data } = await api.post<FloorItem>('/floors', { name });
+        const data = await floorsApi.create(name);
         setFloors((current) => [...current, data]);
         setActiveFloorId(data.id);
         setToast('Đã tạo tầng mới thành công');
@@ -502,8 +502,8 @@ export function FloorEditorPage() {
   async function findSafePath(startId: string, endId: string) {
     if (!activeFloorId) return;
     try {
-      const { data } = await api.get<string[]>(`/floors/${activeFloorId}/path?start_node_id=${startId}&end_node_id=${endId}`);
-      setSafePath(data);
+      const path = await floorsApi.findPath(activeFloorId, startId, endId);
+      setSafePath(path);
       selection.clearSelection();
     } catch (error: any) {
       alert(error.response?.data?.detail || 'Không thể tìm thấy đường đi an toàn.');

@@ -1,12 +1,14 @@
 import { useCallback, useState } from 'react';
 
+const MAX_HISTORY_ENTRIES = 100;
+
 export function useHistory<T>(initial: T) {
   const [past, setPast] = useState<T[]>([]);
   const [present, setPresent] = useState<T>(initial);
   const [future, setFuture] = useState<T[]>([]);
 
   const set = useCallback((next: T) => {
-    setPast((current) => [...current, present]);
+    setPast((current) => [...current, present].slice(-MAX_HISTORY_ENTRIES));
     setPresent(next);
     setFuture([]);
   }, [present]);
@@ -25,7 +27,7 @@ export function useHistory<T>(initial: T) {
     setFuture((currentFuture) => {
       if (!currentFuture.length) return currentFuture;
       const next = currentFuture[0];
-      setPast((currentPast) => [...currentPast, present]);
+      setPast((currentPast) => [...currentPast, present].slice(-MAX_HISTORY_ENTRIES));
       setPresent(next);
       return currentFuture.slice(1);
     });

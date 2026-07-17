@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { FloorPlanObject, FloorItem } from '../../types/editor';
 import { useThemeStore } from '../../store/themeStore';
 import { getDefaultSize } from '../../utils/geometryHelpers';
-import api from '../../utils/api';
+import { sensorsApi } from '../../services/backend';
 import clsx from 'clsx';
 import { ToggleLeft, ToggleRight, Radio, Shield, Settings, Compass, Palette } from 'lucide-react';
 
@@ -86,9 +86,9 @@ export function PropertyPanel({
   useEffect(() => {
     if (object && (object.type === 'mq2' || object.type === 'temp')) {
       setLoadingDevices(true);
-      api.get<SensorDeviceOption[]>('/sensors/readings/live')
-        .then((res) => {
-          setPhysicalDevices(res.data);
+      sensorsApi.liveReadings()
+        .then((readings) => {
+          setPhysicalDevices(readings);
         })
         .catch((err) => {
           console.error('Failed to load physical sensors list:', err);

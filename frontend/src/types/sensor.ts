@@ -20,3 +20,16 @@ export interface DashboardSummary {
   danger_count: number;
   latest_updated_at: string | null;
 }
+
+export interface SensorReading {
+  id: number;
+  device_id: string;
+  name: string;
+  sensor_type: 'mq2' | 'temp';
+  value: number;
+  status: 'safe' | 'danger';
+  unit: string;
+  created_at: string;
+  floor_id: number | null;
+  room_name: string | null;
+}

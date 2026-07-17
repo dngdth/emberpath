@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { AuthResponse, User } from '../types/auth';
-import api from '../utils/api';
+import { User } from '../types/auth';
+import { authApi, RegisterPayload } from '../services/backend';
 import { clearToken, getToken, saveToken } from '../utils/authHelpers';
 
 interface AuthState {
@@ -8,7 +8,7 @@ interface AuthState {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (payload: Record<string, string>) => Promise<void>;
+  register: (payload: RegisterPayload) => Promise<void>;
   logout: () => void;
   bootstrap: () => Promise<void>;
 }
@@ -20,7 +20,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   login: async (email, password) => {
     set({ loading: true });
     try {
-      const { data } = await api.post<AuthResponse>('/auth/login', { email, password });
+      const data = await authApi.login(email, password);
       saveToken(data.access_token);
       set({ token: data.access_token, user: data.user, loading: false });
     } catch (error) {
@@ -31,7 +31,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   register: async (payload) => {
     set({ loading: true });
     try {
-      const { data } = await api.post<AuthResponse>('/auth/register', payload);
+      const data = await authApi.register(payload);
       saveToken(data.access_token);
       set({ token: data.access_token, user: data.user, loading: false });
     } catch (error) {
@@ -48,8 +48,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     if (!token) return;
     set({ loading: true });
     try {
-      const { data } = await api.get<User>('/auth/me');
-      set({ user: data, token, loading: false });
+      const user = await authApi.me();
+      set({ user, token, loading: false });
     } catch {
       clearToken();
       set({ user: null, token: null, loading: false });

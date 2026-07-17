@@ -1,8 +1,10 @@
 import axios from 'axios';
 import { clearToken, getToken } from './authHelpers';
 
+export const getApiBaseUrl = () => import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000',
+  baseURL: getApiBaseUrl(),
 });
 
 api.interceptors.request.use((config) => {

@@ -1,8 +1,8 @@
 import { useEffect, useState, useMemo } from 'react';
-import api from '../utils/api';
+import { floorsApi } from '../services/backend';
 import { useAuthStore } from '../store/authStore';
 import { useThemeStore } from '../store/themeStore';
-import { FloorItem, FloorPlanObject, FloorPlanResponse } from '../types/editor';
+import { FloorItem, FloorPlanObject } from '../types/editor';
 import { useRealtimeSensors } from '../hooks/useRealtimeSensors';
 import { DashboardSidebar } from '../components/Dashboard/DashboardSidebar';
 import { FloorPlanViewer } from '../components/Dashboard/FloorPlanViewer';
@@ -58,10 +58,10 @@ export function DashboardPage() {
 
   useEffect(() => {
     // Fetch all floors on component mount
-    api.get<FloorItem[]>('/floors').then((response) => {
-      setFloors(response.data);
-      if (response.data.length > 0 && selectedFloor === null) {
-        setSelectedFloor(response.data[0].id);
+    floorsApi.list().then((data) => {
+      setFloors(data);
+      if (data.length > 0 && selectedFloor === null) {
+        setSelectedFloor(data[0].id);
       }
     });
   }, []);
@@ -69,11 +69,11 @@ export function DashboardPage() {
   useEffect(() => {
     if (selectedFloor) {
       setLoadingPlan(true);
-      api.get<FloorPlanResponse>(`/floors/${selectedFloor}/plan`)
-        .then((res) => {
-          setObjects(res.data.objects);
-          setCanvasWidth(res.data.canvas_width ?? 1600);
-          setCanvasHeight(res.data.canvas_height ?? 1000);
+      floorsApi.getPlan(selectedFloor)
+        .then((plan) => {
+          setObjects(plan.objects);
+          setCanvasWidth(plan.canvas_width ?? 1600);
+          setCanvasHeight(plan.canvas_height ?? 1000);
           // Reset pathfinding states on floor switch
           setSafePath([]);
           setSelectedStartRoomId(null);
@@ -169,10 +169,8 @@ export function DashboardPage() {
     setEvacuationActive(true);
 
     try {
-      const { data } = await api.get<string[]>(
-        `/floors/${selectedFloor}/path?start_node_id=${startId}&end_node_id=${exitNode.id}`
-      );
-      setSafePath(data);
+      const path = await floorsApi.findPath(selectedFloor, startId, exitNode.id);
+      setSafePath(path);
     } catch (err) {
       console.warn('Backend pathfinding unavailable. Falling back to layout routing...', err);
       // Fallback: draw startRoom -> lobby (if exists) -> exit

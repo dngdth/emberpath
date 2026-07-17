@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import api from '../utils/api';
 import { DashboardSummary, SensorDevice } from '../types/sensor';
-import { getToken } from '../utils/authHelpers';
+import { getSensorsWebSocketUrl, sensorsApi } from '../services/backend';
 
 // Danh sach device_id that tu ESP32 (khop voi buoi1.ino)
 const REAL_DEVICE_IDS = new Set([
@@ -19,23 +18,23 @@ export function useRealtimeSensors(selectedFloor?: number | null, search?: strin
 
   const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
 
-  const queryParams = useMemo(() => {
-    const params = new URLSearchParams();
-    if (selectedFloor) params.set('floor_id', String(selectedFloor));
-    if (search) params.set('search', search);
-    return params.toString();
+  const filters = useMemo(() => {
+    return {
+      floorId: selectedFloor,
+      search,
+    };
   }, [selectedFloor, search]);
 
   // Fetch am tham - khong set loading (WebSocket background refresh)
   async function refreshData() {
-    const [summaryRes, mq2Res, tempRes] = await Promise.all([
-      api.get<DashboardSummary>('/dashboard/summary'),
-      api.get<SensorDevice[]>(`/sensors/mq2${queryParams ? `?${queryParams}` : ''}`),
-      api.get<SensorDevice[]>(`/sensors/temperature${queryParams ? `?${queryParams}` : ''}`),
+    const [summaryData, mq2Data, tempData] = await Promise.all([
+      sensorsApi.dashboardSummary(),
+      sensorsApi.mq2(filters),
+      sensorsApi.temperature(filters),
     ]);
-    setSummary(summaryRes.data);
-    setMq2(mq2Res.data.filter((s) => REAL_DEVICE_IDS.has(s.device_id)));
-    setTemperature(tempRes.data.filter((s) => REAL_DEVICE_IDS.has(s.device_id)));
+    setSummary(summaryData);
+    setMq2(mq2Data.filter((s) => REAL_DEVICE_IDS.has(s.device_id)));
+    setTemperature(tempData.filter((s) => REAL_DEVICE_IDS.has(s.device_id)));
   }
 
   // Fetch co loading - dung lan dau hoac khi doi bo loc
@@ -50,20 +49,19 @@ export function useRealtimeSensors(selectedFloor?: number | null, search?: strin
 
   useEffect(() => {
     void fetchAll();
-  }, [queryParams]);
+  }, [filters]);
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) return;
-    const base = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
-    const wsUrl = base.replace('http', 'ws') + `/ws/sensors?token=${token}`;
+    const wsUrl = getSensorsWebSocketUrl();
+    if (!wsUrl) return;
+    const socketUrl = wsUrl;
     
     let socket: WebSocket | null = null;
     let reconnectTimeout: number | null = null;
 
     function connect() {
       setWsStatus('connecting');
-      socket = new WebSocket(wsUrl);
+      socket = new WebSocket(socketUrl);
 
       socket.onopen = () => {
         setWsStatus('connected');
@@ -101,7 +99,7 @@ export function useRealtimeSensors(selectedFloor?: number | null, search?: strin
         window.clearTimeout(reconnectTimeout);
       }
     };
-  }, [queryParams]);
+  }, [filters]);
 
   return { summary, mq2, temperature, loading, wsStatus, refresh: fetchAll };
 }

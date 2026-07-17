@@ -20,9 +20,12 @@ export function getDefaultSize(type: FloorPlanObject['type']) {
       return { width: 60, height: 60 };
     case 'wall':
       return { width: 160, height: 16 };
+    case 'sensor':
     case 'mq2':
     case 'temp':
       return { width: 36, height: 36 };
+    case 'led_wire':
+      return { width: 40, height: 40 };
     case 'led':
       return { width: 16, height: 16 };
     case 'label':

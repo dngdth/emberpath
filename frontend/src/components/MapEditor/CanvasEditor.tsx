@@ -1,15 +1,36 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import Konva from 'konva';
 import { Circle, Group, Layer, Line, Rect, Stage, Text, Transformer } from 'react-konva';
 import { FloorPlanObject } from '../../types/editor';
 import { SensorDevice } from '../../types/sensor';
-import { getDefaultSize, isResizable, getCanvasPoints, connectorIntersectsWall, isPointInPolygon } from '../../utils/geometryHelpers';
-import { snapPosition } from '../../utils/snapHelpers';
-import { StairsSymbol } from './StairsSymbol';
-import { getGuideLines } from '../../utils/snapHelpers';
+import { getDefaultSize, isResizable, isPointInPolygon } from '../../utils/geometryHelpers';
+import { snapPosition, getGuideLines } from '../../utils/snapHelpers';
 import { useThemeStore } from '../../store/themeStore';
 import { createNewObject } from '../../data/initialMockData';
-import clsx from 'clsx';
+import { usePenDrawing } from '../../hooks/usePenDrawing';
+import { LedWireShape } from './Shapes/LedWireShape';
+
+// Shape components imports
+import { FloorBaseShape } from './Shapes/FloorBaseShape';
+import { RoomShape } from './Shapes/RoomShape';
+import { DoorShape } from './Shapes/DoorShape';
+import { ExitShape } from './Shapes/ExitShape';
+import { StairsShape } from './Shapes/StairsShape';
+import { ElevatorShape } from './Shapes/ElevatorShape';
+import { WallShape } from './Shapes/WallShape';
+import { SensorShape } from './Shapes/SensorShape';
+import { LedShape } from './Shapes/LedShape';
+import { ConnectorShape } from './Shapes/ConnectorShape';
+import { LabelShape } from './Shapes/LabelShape';
+import { BelowObjectOutline } from './Shapes/BelowObjectOutline';
+import { PolygonVertexHandles } from './Shapes/PolygonVertexHandles';
+import { SheetEdgeResizers } from './Shapes/SheetEdgeResizers';
+
+// Overlay components imports
+import { ZoomControls } from './Overlays/ZoomControls';
+import { SelectionToolbar } from './Overlays/SelectionToolbar';
+import { ContextMenu } from './Overlays/ContextMenu';
+import { TextEditorOverlay } from './Overlays/TextEditorOverlay';
 
 interface Props {
   objects: FloorPlanObject[];
@@ -50,7 +71,7 @@ interface Props {
 
 const GRID_SIZE = 24;
 
-export function CanvasEditor(props: Props) {
+function CanvasEditorComponent(props: Props) {
   const canvasWidth = props.canvasWidth ?? 1600;
   const canvasHeight = props.canvasHeight ?? 1000;
 
@@ -64,15 +85,20 @@ export function CanvasEditor(props: Props) {
   const { darkMode } = useThemeStore();
   const isDark = darkMode;
 
-  // Pen tool drawing state
-  const [drawingState, setDrawingState] = useState<{
-    type: 'floor_base' | 'room';
-    startX: number;
-    startY: number;
-    points: number[];
-  } | null>(null);
-
-  const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
+  // Pen tool drawing hook
+  const {
+    drawingState,
+    mousePos,
+    handleCanvasClick,
+    handleMouseMove: handlePenMouseMove,
+    cancelDrawing,
+  } = usePenDrawing(
+    props.activeTool,
+    props.onAddCustomObject,
+    props.onAddObject,
+    props.onSelect,
+    () => props.onContextAction('select', '')
+  );
 
   const gridPattern = useMemo(() => {
     if (typeof window === 'undefined') return null;
@@ -104,7 +130,7 @@ export function CanvasEditor(props: Props) {
   const [viewport, setViewport] = useState({ width: 1200, height: 760 });
   const [hoveredEdge, setHoveredEdge] = useState<'left' | 'right' | 'top' | 'bottom' | null>(null);
   const [dragResizeBounds, setDragResizeBounds] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-  const activeEdge: string | null = hoveredEdge;
+  const activeEdge = hoveredEdge;
 
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState<{ x: number; y: number } | null>(null);
@@ -126,8 +152,7 @@ export function CanvasEditor(props: Props) {
       }
       if (e.code === 'Escape') {
         if (drawingState) {
-          setDrawingState(null);
-          props.onContextAction('select', '');
+          cancelDrawing();
           e.preventDefault();
         }
       }
@@ -210,7 +235,7 @@ export function CanvasEditor(props: Props) {
     const dangerPositions: { x: number; y: number }[] = [];
 
     props.objects.forEach((obj) => {
-      if (obj.type === 'mq2' || obj.type === 'temp') {
+      if (obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp') {
         if (dangerDeviceIds.has(obj.id)) {
           dangerPositions.push({ x: obj.x, y: obj.y });
         }
@@ -340,66 +365,13 @@ export function CanvasEditor(props: Props) {
     const isPanningAction = isSpacePressed || event.evt.button === 1;
 
     // Drawing Mode click logic (Pen Tool)
-    const isPenTool = props.activeTool === 'room-pen' || props.activeTool === 'floor_base-pen';
+    const isPenTool = props.activeTool === 'room-pen' || props.activeTool === 'floor_base-pen' || props.activeTool === 'led_wire-pen';
     if (props.editMode && isPenTool && !isPanningAction) {
       const pointer = stagePointerToWorld();
       if (!pointer) return;
 
-      const type = props.activeTool === 'room-pen' ? 'room' : 'floor_base';
-
-      if (!drawingState) {
-        setDrawingState({
-          type,
-          startX: pointer.x,
-          startY: pointer.y,
-          points: [0, 0],
-        });
-      } else {
-        const dx = pointer.x - drawingState.startX;
-        const dy = pointer.y - drawingState.startY;
-        const distToStart = Math.hypot(dx, dy);
-
-        // Click close to starting point to close polygon (minimum 3 points required)
-        if (distToStart < 12 && drawingState.points.length >= 6) {
-          let minX = Infinity;
-          let minY = Infinity;
-          for (let i = 0; i < drawingState.points.length; i += 2) {
-            const px = drawingState.startX + drawingState.points[i];
-            const py = drawingState.startY + drawingState.points[i + 1];
-            minX = Math.min(minX, px);
-            minY = Math.min(minY, py);
-          }
-
-          const relativePoints = [];
-          for (let i = 0; i < drawingState.points.length; i += 2) {
-            relativePoints.push(drawingState.startX + drawingState.points[i] - minX);
-            relativePoints.push(drawingState.startY + drawingState.points[i + 1] - minY);
-          }
-
-          const newObj = {
-            ...createNewObject(drawingState.type + '-pen', minX, minY),
-            points: relativePoints,
-          };
-
-          if (props.onAddCustomObject) {
-            props.onAddCustomObject(newObj);
-          } else {
-            props.onAddObject(newObj.type, minX, minY);
-          }
-          
-          setDrawingState(null);
-          props.onSelect(newObj.id, false);
-          props.onContextAction('select', '');
-          return;
-        }
-
-        // Add next point
-        setDrawingState({
-          ...drawingState,
-          points: [...drawingState.points, dx, dy],
-        });
-      }
-      return;
+      const handled = handleCanvasClick(pointer.x, pointer.y, event.evt.button);
+      if (handled) return;
     }
 
     // Adding objects on click if a tool is active (Edit Mode only), unless trying to pan
@@ -443,7 +415,7 @@ export function CanvasEditor(props: Props) {
 
     if (drawingState) {
       const pointer = stagePointerToWorld();
-      if (pointer) setMousePos(pointer);
+      if (pointer) handlePenMouseMove(pointer.x, pointer.y);
     }
   }
 
@@ -525,35 +497,6 @@ export function CanvasEditor(props: Props) {
     }
   }
 
-  function objectFill(object: FloorPlanObject) {
-    if (object.type === 'floor_base') {
-      return isDark ? 'rgba(30, 41, 59, 0.6)' : 'rgba(203, 213, 225, 0.5)';
-    }
-    if (object.type === 'room') {
-      const isDanger = dangerRooms.has(object.id);
-      if (isDanger) {
-        return 'rgba(239, 68, 68, 0.45)';
-      }
-      return isDark ? 'rgba(16, 185, 129, 0.12)' : object.color || 'rgba(234, 217, 207, 0.4)';
-    }
-    if (object.type === 'exit') return '#2ea85f';
-    if (object.type === 'door') return '#d9a36b';
-    if (object.type === 'stairs') return object.color || '#cbd5e1';
-    if (object.type === 'elevator') return '#e2e8f0';
-    if (object.type === 'wall') return '#64748b';
-    if (object.type === 'mq2' || object.type === 'temp') {
-      const isDanger = dangerDeviceIds.has(object.id);
-      const isWarning = warningDeviceIds.has(object.id);
-      if (isDanger) return '#ef4444';
-      if (isWarning) return '#f59e0b';
-      return '#38bdf8';
-    }
-    if (object.type === 'led') {
-      return object.nodeStatus === 'danger' ? '#ef4444' : '#10b981';
-    }
-    return object.color || '#fff8f3';
-  }
-
   // Layering helper: floor_base at bottom, connector at top
   const sortedObjects = useMemo(() => {
     const bases = props.objects.filter((o) => o.type === 'floor_base');
@@ -562,226 +505,25 @@ export function CanvasEditor(props: Props) {
     return [...bases, ...others, ...connectors];
   }, [props.objects]);
 
+  // Memoized render functions delegating to sub-components
+  const renderBelowOutline = useCallback((object: FloorPlanObject) => {
+    return <BelowObjectOutline key={`below-${object.id}`} object={object} isDark={isDark} />;
+  }, [isDark]);
 
-
-  function renderBelowObjectOutline(object: FloorPlanObject) {
-    const width = object.width || getDefaultSize(object.type).width;
-    const height = object.height || getDefaultSize(object.type).height;
-    
-    const strokeColor = isDark 
-      ? 'rgba(165, 180, 252, 0.85)' 
-      : 'rgba(79, 70, 229, 0.35)';
-
-    const strokeWidth = 1.2;
-    const dash = [5, 4];
-    
-    const commonBelowProps = {
-      key: `below-${object.id}`,
-      x: object.x,
-      y: object.y,
-      rotation: object.rotation || 0,
-      listening: false,
-    };
-
-    if (object.type === 'floor_base') {
-      const isPolygon = object.shapeType === 'polygon';
-      const pts = isPolygon ? object.points || [] : [0, 0, width, 0, width, height, 0, height];
-      return (
-        <Group {...commonBelowProps}>
-          <Line
-            points={pts}
-            closed={true}
-            stroke={strokeColor}
-            strokeWidth={strokeWidth}
-            dash={dash}
-            fill={isDark ? 'rgba(30, 41, 59, 0.35)' : 'rgba(203, 213, 225, 0.1)'}
-          />
-        </Group>
-      );
-    }
-
-    if (object.type === 'room') {
-      const isPolygon = object.shapeType === 'polygon';
-      return (
-        <Group {...commonBelowProps}>
-          {isPolygon ? (
-            <Line
-              points={object.points || []}
-              closed={true}
-              stroke={strokeColor}
-              strokeWidth={strokeWidth}
-              dash={dash}
-              fill={isDark ? 'rgba(99, 102, 241, 0.07)' : 'rgba(234, 217, 207, 0.08)'}
-            />
-          ) : (
-            <Rect
-              width={width}
-              height={height}
-              stroke={strokeColor}
-              strokeWidth={strokeWidth}
-              dash={dash}
-              cornerRadius={16}
-              fill={isDark ? 'rgba(99, 102, 241, 0.07)' : 'rgba(234, 217, 207, 0.08)'}
-            />
-          )}
-          <Text
-            text={object.name || ''}
-            x={isPolygon ? (object.points?.[0] || 0) + 12 : 12}
-            y={isPolygon ? (object.points?.[1] || 0) + 12 : 12}
-            fontSize={11}
-            fontStyle="bold"
-            fill={strokeColor}
-            opacity={0.8}
-          />
-        </Group>
-      );
-    }
-
-    if (object.type === 'door') {
-      const doorColor = isDark ? 'rgba(217, 163, 107, 0.45)' : 'rgba(217, 163, 107, 0.25)';
-      return (
-        <Group {...commonBelowProps}>
-          <Rect
-            width={width}
-            height={height}
-            stroke={strokeColor}
-            strokeWidth={strokeWidth}
-            dash={dash}
-            cornerRadius={4}
-            fill={doorColor}
-          />
-          <Line
-            points={[0, 0, width, height]}
-            stroke={strokeColor}
-            strokeWidth={0.8}
-            dash={[3, 3]}
-          />
-          <Text
-            text="Cửa"
-            x={width + 4}
-            y={height / 2 - 5}
-            fontSize={9}
-            fill={strokeColor}
-            opacity={0.8}
-            fontStyle="bold"
-          />
-        </Group>
-      );
-    }
-
-    if (object.type === 'exit') {
-      const exitBgColor = isDark ? 'rgba(16, 185, 129, 0.4)' : 'rgba(46, 168, 95, 0.25)';
-      const exitBorderColor = isDark ? 'rgba(52, 211, 153, 0.85)' : 'rgba(34, 197, 94, 0.4)';
-      return (
-        <Group {...commonBelowProps}>
-          <Rect
-            width={width}
-            height={height}
-            stroke={exitBorderColor}
-            strokeWidth={strokeWidth}
-            dash={dash}
-            cornerRadius={8}
-            fill={exitBgColor}
-          />
-          <Text
-            text="EXIT"
-            width={width}
-            align="center"
-            y={height / 2 - 5}
-            fontStyle="bold"
-            fontSize={9}
-            fill={exitBorderColor}
-            opacity={0.9}
-          />
-        </Group>
-      );
-    }
-
-    if (object.type === 'stairs') {
-      return (
-        <Group {...commonBelowProps}>
-          <Rect
-            width={width}
-            height={height}
-            stroke={strokeColor}
-            strokeWidth={strokeWidth}
-            dash={dash}
-            cornerRadius={8}
-            fill={isDark ? 'rgba(99, 102, 241, 0.15)' : 'rgba(203, 213, 225, 0.2)'}
-          />
-          <StairsSymbol width={width} height={height} strokeColor={strokeColor} strokeWidth={strokeWidth} isDashed={true} />
-        </Group>
-      );
-    }
-
-    if (object.type === 'elevator') {
-      return (
-        <Group {...commonBelowProps}>
-          <Rect
-            width={width}
-            height={height}
-            stroke={strokeColor}
-            strokeWidth={strokeWidth}
-            dash={dash}
-            cornerRadius={8}
-            fill={isDark ? 'rgba(148, 163, 184, 0.25)' : 'rgba(226, 232, 240, 0.2)'}
-          />
-          <Line
-            points={[width / 2, 4, width / 2, height - 4]}
-            stroke={strokeColor}
-            strokeWidth={strokeWidth}
-            dash={dash}
-          />
-        </Group>
-      );
-    }
-
-    if (object.type === 'wall') {
-      const wallColor = isDark ? 'rgba(148, 163, 184, 0.45)' : 'rgba(100, 116, 139, 0.3)';
-      return (
-        <Group {...commonBelowProps}>
-          <Rect
-            width={width}
-            height={height}
-            stroke={strokeColor}
-            strokeWidth={strokeWidth}
-            dash={dash}
-            cornerRadius={2}
-            fill={wallColor}
-          />
-        </Group>
-      );
-    }
-
-    if (object.type === 'label') {
-      return (
-        <Group {...commonBelowProps}>
-          <Text
-            text={object.name || ''}
-            fontSize={object.fontSize || 18}
-            fill={strokeColor}
-            opacity={0.8}
-            fontStyle="bold"
-          />
-        </Group>
-      );
-    }
-
-    return null;
-  }
-
-  function renderObject(object: FloorPlanObject) {
+  const renderPlanObject = useCallback((object: FloorPlanObject) => {
     if (object.visible === false || object.id === editingLabelId) return null;
 
     const selected = selectedIdSet.has(object.id);
+    const isRoomDanger = object.type === 'room' && dangerRooms.has(object.id);
+    const isSensorDanger = (object.type === 'mq2' || object.type === 'temp') && dangerDeviceIds.has(object.id);
+    const isSensorWarning = (object.type === 'mq2' || object.type === 'temp') && warningDeviceIds.has(object.id);
+    const sensorReading = sensorValues.get(object.id);
+
     const width = object.width || getDefaultSize(object.type).width;
     const height = object.height || getDefaultSize(object.type).height;
 
-    const isRoomDanger = object.type === 'room' && dangerRooms.has(object.id);
-
     const commonProps = {
       id: object.id,
-      key: object.id,
       x: object.x,
       y: object.y,
       draggable: !object.locked && !isPanning && !isSpacePressed && props.editMode,
@@ -881,385 +623,158 @@ export function CanvasEditor(props: Props) {
       },
     };
 
-    if (object.type === 'floor_base') {
-      const isPolygon = object.shapeType === 'polygon';
-      const pts = isPolygon ? object.points || [] : [0, 0, width, 0, width, height, 0, height];
-      return (
-        <Group {...commonProps}>
-          {/* clipped grid inside Floor Base boundary */}
-          <Group
-            clipFunc={(ctx) => {
-              if (pts.length < 4) return;
-              ctx.beginPath();
-              ctx.moveTo(pts[0], pts[1]);
-              for (let i = 2; i < pts.length; i += 2) {
-                ctx.lineTo(pts[i], pts[i + 1]);
-              }
-              ctx.closePath();
-            }}
-          >
-            <Rect
-              x={0}
-              y={0}
-              width={isPolygon ? 4000 : width}
-              height={isPolygon ? 4000 : height}
-              fill={objectFill(object)}
-            />
-          </Group>
-          {/* Custom outer frame stroke */}
-          <Line
-            id={isPolygon ? `${object.id}-polygon` : undefined}
-            points={pts}
-            closed={true}
-            stroke={selected ? '#3b82f6' : isDark ? '#475569' : '#cbd5e1'}
-            strokeWidth={selected ? 2.5 : 1.5}
-            shadowColor="rgba(0, 0, 0, 0.1)"
-            shadowBlur={selected ? 8 : 2}
+    switch (object.type) {
+      case 'floor_base':
+        return (
+          <FloorBaseShape
+            key={object.id}
+            object={object}
+            selected={selected}
+            isDark={isDark}
+            commonProps={commonProps}
           />
-          <Text
-            text={object.name || 'Floor Base'}
-            x={pts[0] + 16}
-            y={pts[1] + 16}
-            fontSize={12}
-            fontStyle="bold"
-            fill={isDark ? '#475569' : '#94a3b8'}
+        );
+      case 'room':
+        return (
+          <RoomShape
+            key={object.id}
+            object={object}
+            selected={selected}
+            isDark={isDark}
+            isRoomDanger={isRoomDanger}
+            commonProps={commonProps}
           />
-        </Group>
-      );
+        );
+      case 'door':
+        return (
+          <DoorShape
+            key={object.id}
+            object={object}
+            selected={selected}
+            isDark={isDark}
+            commonProps={commonProps}
+          />
+        );
+      case 'exit':
+        return (
+          <ExitShape
+            key={object.id}
+            object={object}
+            selected={selected}
+            commonProps={commonProps}
+          />
+        );
+      case 'stairs':
+        return (
+          <StairsShape
+            key={object.id}
+            object={object}
+            selected={selected}
+            isDark={isDark}
+            commonProps={commonProps}
+          />
+        );
+      case 'elevator':
+        return (
+          <ElevatorShape
+            key={object.id}
+            object={object}
+            selected={selected}
+            isDark={isDark}
+            commonProps={commonProps}
+          />
+        );
+      case 'wall':
+        return (
+          <WallShape
+            key={object.id}
+            object={object}
+            selected={selected}
+            isDark={isDark}
+            commonProps={commonProps}
+          />
+        );
+      case 'sensor':
+      case 'mq2':
+      case 'temp':
+        return (
+          <SensorShape
+            key={object.id}
+            object={object}
+            selected={selected}
+            isDark={isDark}
+            isDanger={isSensorDanger}
+            isWarning={isSensorWarning}
+            reading={sensorReading}
+            commonProps={commonProps}
+          />
+        );
+      case 'led_wire':
+        return (
+          <LedWireShape
+            key={object.id}
+            object={object}
+            selected={selected}
+            isDark={isDark}
+            active={Boolean(props.safePath && props.safePath.length > 0)}
+            commonProps={commonProps}
+          />
+        );
+      case 'led':
+        return (
+          <LedShape
+            key={object.id}
+            object={object}
+            selected={selected}
+            commonProps={commonProps}
+          />
+        );
+      case 'connector':
+        return (
+          <ConnectorShape
+            key={object.id}
+            object={object}
+            selected={selected}
+            isDark={isDark}
+            fromNode={object.fromNodeId ? objectById.get(object.fromNodeId) : undefined}
+            toNode={object.toNodeId ? objectById.get(object.toNodeId) : undefined}
+            wallObjects={wallObjects}
+            commonProps={commonProps}
+          />
+        );
+      default:
+        return (
+          <LabelShape
+            key={object.id}
+            object={object}
+            isDark={isDark}
+            commonProps={commonProps}
+          />
+        );
     }
+  }, [
+    selectedIdSet,
+    dangerRooms,
+    dangerDeviceIds,
+    warningDeviceIds,
+    sensorValues,
+    isDark,
+    editingLabelId,
+    isPanning,
+    isSpacePressed,
+    props.editMode,
+    props.scale,
+    props.snapEnabled,
+    props.activeTool,
+    props.onSelect,
+    props.onUpdateObject,
+    props.onContextAction,
+    objectById,
+    wallObjects,
+    props.objects,
+  ]);
 
-    if (object.type === 'room') {
-      const roomStroke = isRoomDanger ? '#ef4444' : selected ? '#3b82f6' : '#cbd5e1';
-      return (
-        <Group {...commonProps}>
-          {object.shapeType === 'polygon' ? (
-            <Line
-              id={`${object.id}-polygon`}
-              name={isRoomDanger ? "danger-blink" : undefined}
-              points={object.points || []}
-              closed={true}
-              fill={objectFill(object)}
-              stroke={roomStroke}
-              strokeWidth={selected || isRoomDanger ? 3 : 1.5}
-              shadowColor={isRoomDanger ? '#ef4444' : selected ? '#3b82f6' : 'rgba(0, 0, 0, 0.04)'}
-              shadowBlur={selected || isRoomDanger ? 12 : 0}
-              shadowOpacity={0.6}
-            />
-          ) : (
-            <Rect
-              name={isRoomDanger ? "danger-blink" : undefined}
-              width={width}
-              height={height}
-              fill={objectFill(object)}
-              stroke={roomStroke}
-              cornerRadius={16}
-              strokeWidth={selected || isRoomDanger ? 3 : 1.5}
-              shadowColor={isRoomDanger ? '#ef4444' : selected ? '#3b82f6' : 'rgba(0, 0, 0, 0.04)'}
-              shadowBlur={selected || isRoomDanger ? 12 : 0}
-              shadowOpacity={0.6}
-            />
-          )}
-          <Text
-            text={object.name || 'Room'}
-            x={object.shapeType === 'polygon' ? (object.points?.[0] || 0) + 16 : 16}
-            y={object.shapeType === 'polygon' ? (object.points?.[1] || 0) + 16 : 14}
-            fontSize={15}
-            fontStyle="bold"
-            fill={isRoomDanger ? '#ef4444' : object.textColor || (isDark ? '#f8fafc' : '#334155')}
-          />
-          {isRoomDanger && (
-            <Group x={object.shapeType === 'polygon' ? (object.points?.[0] || 0) + 16 : 16} y={object.shapeType === 'polygon' ? (object.points?.[1] || 0) + 38 : 38}>
-              <Rect width={84} height={20} fill="#ef4444" cornerRadius={6} />
-              <Text text="⚠️ DANGER" x={8} y={5} fontSize={10} fontStyle="bold" fill="#ffffff" />
-            </Group>
-          )}
-        </Group>
-      );
-    }
-
-    if (object.type === 'door') {
-      return (
-        <Group {...commonProps}>
-          <Rect
-            width={width}
-            height={height}
-            fill={objectFill(object)}
-            cornerRadius={4}
-            stroke={selected ? '#3b82f6' : 'transparent'}
-            strokeWidth={1.5}
-          />
-          <Text
-            text={object.name || ''}
-            x={-10}
-            y={height + 6}
-            fontSize={11}
-            fill={isDark ? '#94a3b8' : '#475569'}
-          />
-        </Group>
-      );
-    }
-
-    if (object.type === 'exit') {
-      return (
-        <Group {...commonProps}>
-          <Rect
-            width={width}
-            height={height}
-            fill={objectFill(object)}
-            cornerRadius={8}
-            stroke={selected ? '#3b82f6' : '#10b981'}
-            strokeWidth={1.5}
-          />
-          <Text
-            text={object.name || 'EXIT'}
-            width={width}
-            align="center"
-            y={height / 2 - 6}
-            fontStyle="bold"
-            fontSize={12}
-            fill="#ffffff"
-          />
-        </Group>
-      );
-    }
-
-    if (object.type === 'stairs') {
-      const stairStrokeColor = selected ? '#3b82f6' : '#475569';
-      return (
-        <Group {...commonProps}>
-          <Rect
-            width={width}
-            height={height}
-            fill={objectFill(object)}
-            stroke={stairStrokeColor}
-            strokeWidth={1.5}
-            cornerRadius={8}
-          />
-          <StairsSymbol width={width} height={height} strokeColor={stairStrokeColor} strokeWidth={1.5} isDashed={false} />
-          {object.target_floor_id && (
-            <Group x={width / 2 - 25} y={height - 16}>
-              <Rect
-                width={50}
-                height={12}
-                fill={isDark ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.85)'}
-                cornerRadius={3}
-                stroke={isDark ? '#38bdf8' : '#2563eb'}
-                strokeWidth={0.5}
-              />
-              <Text
-                text={`F ${object.target_floor_id}`}
-                width={50}
-                align="center"
-                y={2.5}
-                fontSize={7}
-                fontStyle="bold"
-                fill={isDark ? '#38bdf8' : '#2563eb'}
-              />
-            </Group>
-          )}
-        </Group>
-      );
-    }
-
-    if (object.type === 'elevator') {
-      return (
-        <Group {...commonProps}>
-          <Rect
-            width={width}
-            height={height}
-            fill={objectFill(object)}
-            stroke={selected ? '#3b82f6' : '#cbd5e1'}
-            strokeWidth={1.5}
-            cornerRadius={8}
-          />
-          <Line
-            points={[width / 2, 4, width / 2, height - 4]}
-            stroke={isDark ? '#475569' : '#94a3b8'}
-            strokeWidth={1.5}
-          />
-          <Text
-            text="🛗 Lift"
-            width={width}
-            align="center"
-            y={height / 2 - 6}
-            fontSize={11}
-            fontStyle="bold"
-            fill={isDark ? '#cbd5e1' : '#475569'}
-          />
-          {object.target_floor_id && (
-            <Text
-              text={`-> Floor ${object.target_floor_id}`}
-              width={width}
-              align="center"
-              y={height - 16}
-              fontSize={8}
-              fontStyle="bold"
-              fill={isDark ? '#38bdf8' : '#2563eb'}
-            />
-          )}
-        </Group>
-      );
-    }
-
-    if (object.type === 'wall') {
-      return (
-        <Group {...commonProps}>
-          <Rect
-            width={width}
-            height={height}
-            fill={objectFill(object)}
-            stroke={selected ? '#3b82f6' : isDark ? '#1e293b' : '#cbd5e1'}
-            strokeWidth={selected ? 2 : 1}
-            cornerRadius={2}
-            shadowColor="black"
-            shadowBlur={selected ? 6 : 2}
-            shadowOpacity={0.25}
-          />
-        </Group>
-      );
-    }
-
-    if (object.type === 'mq2' || object.type === 'temp') {
-      const isDanger = dangerDeviceIds.has(object.id);
-      const isWarning = warningDeviceIds.has(object.id);
-
-      let badgeColor = isDark ? '#1e293b' : '#f1f5f9';
-      let strokeColor = isDark ? '#334155' : '#cbd5e1';
-      let textColor = isDark ? '#cbd5e1' : '#475569';
-
-      if (isDanger) {
-        badgeColor = '#ef4444';
-        strokeColor = '#fca5a5';
-        textColor = '#ffffff';
-      } else if (isWarning) {
-        badgeColor = '#f59e0b';
-        strokeColor = '#fde68a';
-        textColor = '#ffffff';
-      } else if (selected) {
-        strokeColor = '#3b82f6';
-      }
-
-      const reading = sensorValues.get(object.id);
-      const label = `${object.name || (object.type === 'mq2' ? 'MQ2' : 'Temp')}`;
-      const valueStr = reading ? `${reading.val} ${reading.unit}` : '--';
-
-      return (
-        <Group {...commonProps}>
-          <Circle
-            name={isDanger ? "danger-blink-sensor" : isWarning ? "warning-blink-sensor" : undefined}
-            radius={22}
-            x={22}
-            y={22}
-            fill={badgeColor}
-            stroke={strokeColor}
-            strokeWidth={selected || isDanger || isWarning ? 2.5 : 1.5}
-            shadowColor={isDanger ? '#ef4444' : isWarning ? '#f59e0b' : ''}
-            shadowBlur={isDanger || isWarning ? 10 : 0}
-          />
-          <Text text={object.type === 'mq2' ? '💨' : '🌡️'} x={13} y={13} fontSize={16} />
-          <Text
-            text={label}
-            x={-15}
-            y={48}
-            width={74}
-            align="center"
-            fontSize={10}
-            fontStyle="bold"
-            fill={isDark ? '#cbd5e1' : '#475569'}
-          />
-          <Group x={-10} y={64}>
-            <Rect
-              width={64}
-              height={16}
-              fill={isDark ? '#0f172a' : '#ffffff'}
-              stroke={isDanger ? '#ef4444' : isWarning ? '#f59e0b' : isDark ? '#334155' : '#cbd5e1'}
-              strokeWidth={1}
-              cornerRadius={4}
-            />
-            <Text
-              text={valueStr}
-              width={64}
-              align="center"
-              y={3}
-              fontSize={9}
-              fontStyle="bold"
-              fill={isDanger ? '#ef4444' : isWarning ? '#f59e0b' : isDark ? '#38bdf8' : '#3b82f6'}
-            />
-          </Group>
-        </Group>
-      );
-    }
-
-    if (object.type === 'led') {
-      return (
-        <Group {...commonProps}>
-          <Circle
-            radius={(width || 16) / 2}
-            fill={objectFill(object)}
-            stroke={selected ? '#3b82f6' : '#ffffff'}
-            strokeWidth={1.5}
-            shadowColor={objectFill(object)}
-            shadowBlur={selected ? 8 : 4}
-          />
-        </Group>
-      );
-    }
-
-    if (object.type === 'connector') {
-      const fromNode = object.fromNodeId ? objectById.get(object.fromNodeId) : undefined;
-      const toNode = object.toNodeId ? objectById.get(object.toNodeId) : undefined;
-      if (!fromNode || !toNode) return null;
-
-      const fromSize = getDefaultSize(fromNode.type);
-      const toSize = getDefaultSize(toNode.type);
-
-      const fromX = fromNode.x + (fromNode.width || fromSize.width) / 2;
-      const fromY = fromNode.y + (fromNode.height || fromSize.height) / 2;
-      const toX = toNode.x + (toNode.width || toSize.width) / 2;
-      const toY = toNode.y + (toNode.height || toSize.height) / 2;
-
-      // Realtime wall collision check
-      const intersectsWall = wallObjects.some((wall) => connectorIntersectsWall(fromNode, toNode, wall));
-
-      return (
-        <Group {...commonProps} x={0} y={0}>
-          <Line
-            points={[fromX, fromY, toX, toY]}
-            stroke={intersectsWall ? '#f43f5e' : selected ? '#3b82f6' : isDark ? '#475569' : '#9ca3af'}
-            strokeWidth={selected ? 4 : intersectsWall ? 3.5 : 2}
-            dash={intersectsWall ? [5, 5] : [5, 8]}
-            opacity={intersectsWall ? 0.95 : 0.7}
-            hitStrokeWidth={15}
-          />
-          {intersectsWall && (
-            <Group x={(fromX + toX) / 2 - 8} y={(fromY + toY) / 2 - 8}>
-              <Circle radius={10} fill="#f43f5e" />
-              <Text text="⚠️" x={-6} y={-6} fontSize={10} fill="#ffffff" fontStyle="bold" />
-            </Group>
-          )}
-        </Group>
-      );
-    }
-
-    return (
-      <Group {...commonProps}>
-        <Text
-          text={object.name || 'Label'}
-          fontSize={object.fontSize || 20}
-          fill={
-            object.textColor || object.color
-              ? ((object.textColor === '#f8fafc' || object.color === '#f8fafc') && !isDark)
-                ? '#1e293b'
-                : (object.textColor || object.color)
-              : (isDark ? '#f8fafc' : '#1e293b')
-          }
-          fontStyle="bold"
-        />
-      </Group>
-    );
-  }
-
-  const hasSafePathAnimation = Boolean(safePathPoints);
+  const hasSafePathAnimation = Boolean(safePathPoints) || Boolean(props.safePath && props.safePath.length > 0);
   const hasStatusAnimation = dangerRooms.size > 0 || dangerDeviceIds.size > 0 || warningDeviceIds.size > 0;
 
   useEffect(() => {
@@ -1273,12 +788,17 @@ export function CanvasEditor(props: Props) {
       if (!frame) return;
       const time = frame.time;
 
-      // 1. Animate evacuation path line dashOffset
+      // 1. Animate evacuation path line dashOffset & LED wires
+      const timeDiff = frame.timeDiff;
+      dashOffset = (dashOffset - (timeDiff * 0.05)) % 40;
       if (safePathLineRef.current) {
-        const timeDiff = frame.timeDiff;
-        dashOffset = (dashOffset - (timeDiff * 0.05)) % 40;
         safePathLineRef.current.dashOffset(dashOffset);
       }
+
+      const activeLedWires = stage.find('.active-led-wire');
+      activeLedWires.forEach((node) => {
+        (node as any).dashOffset(dashOffset);
+      });
 
       // 2. Animate blinking danger rooms & warning sensors (500ms intervals)
       const isAlt = Math.floor(time / 500) % 2 === 0;
@@ -1366,10 +886,10 @@ export function CanvasEditor(props: Props) {
             {/* Render underlay of floor below */}
             {props.showBelowBaseline && props.belowObjects && props.belowObjects
               .filter((obj) => !['mq2', 'temp', 'led', 'connector'].includes(obj.type))
-              .map(renderBelowObjectOutline)}
+              .map(renderBelowOutline)}
 
             {/* Render floor plan objects (Base platform at the bottom) */}
-            {sortedObjects.map(renderObject)}
+            {sortedObjects.map(renderPlanObject)}
 
             {/* Pen Tool drawing preview */}
             {drawingState && mousePos && (
@@ -1381,10 +901,11 @@ export function CanvasEditor(props: Props) {
                     mousePos.y - drawingState.startY,
                   ]}
                   stroke="#3b82f6"
-                  strokeWidth={2}
+                  strokeWidth={drawingState.type === 'led_wire' ? 3.5 : 2}
                   dash={[4, 4]}
                 />
-                {drawingState.points.length >= 6 && Math.hypot(mousePos.x - drawingState.startX, mousePos.y - drawingState.startY) < 12 && (
+                {/* Closed polygon start indicator */}
+                {drawingState.type !== 'led_wire' && drawingState.points.length >= 6 && Math.hypot(mousePos.x - drawingState.startX, mousePos.y - drawingState.startY) < 12 && (
                   <Circle
                     x={0}
                     y={0}
@@ -1394,117 +915,26 @@ export function CanvasEditor(props: Props) {
                     strokeWidth={2}
                   />
                 )}
+                {/* Open path node connector snap preview indicator */}
+                {drawingState.type === 'led_wire' && (
+                  <Circle
+                    x={mousePos.x - drawingState.startX}
+                    y={mousePos.y - drawingState.startY}
+                    radius={5}
+                    fill="#3b82f6"
+                  />
+                )}
               </Group>
             )}
 
             {/* Polygon vertex editing handles */}
             {props.editMode && selectedObjects.length === 1 && selectedObjects[0].shapeType === 'polygon' && (
-              <Group x={selectedObjects[0].x} y={selectedObjects[0].y}>
-                {(() => {
-                  const targetObj = selectedObjects[0];
-                  const pts = targetObj.points || [];
-                  const handles: JSX.Element[] = [];
-
-                  for (let i = 0; i < pts.length; i += 2) {
-                    const idx = i;
-                    const vx = pts[idx];
-                    const vy = pts[idx + 1];
-
-                    // 1. Vertex Handle (blue circles)
-                    handles.push(
-                      <Circle
-                        key={`v-${idx}`}
-                        x={vx}
-                        y={vy}
-                        radius={7}
-                        fill="#3b82f6"
-                        stroke="#ffffff"
-                        strokeWidth={2}
-                        draggable
-                        onDragMove={(e) => {
-                          const nextPoints = [...pts];
-                          nextPoints[idx] = e.target.x();
-                          nextPoints[idx + 1] = e.target.y();
-                          const shape = stageRef.current?.findOne(`#${targetObj.id}-polygon`);
-                          if (shape instanceof Konva.Line) {
-                            shape.points(nextPoints);
-                            shape.getLayer()?.batchDraw();
-                          }
-                        }}
-                        onDragEnd={(e) => {
-                          const newVx = e.target.x();
-                          const newVy = e.target.y();
-                          let nextPoints = [...pts];
-                          nextPoints[idx] = newVx;
-                          nextPoints[idx + 1] = newVy;
-
-                          const prevIdx = (idx - 2 + pts.length) % pts.length;
-                          const nextIdx = (idx + 2) % pts.length;
-
-                          const distPrev = Math.hypot(newVx - pts[prevIdx], newVy - pts[prevIdx + 1]);
-                          const distNext = Math.hypot(newVx - pts[nextIdx], newVy - pts[nextIdx + 1]);
-
-                          // Overlap with adjacent vertices deletes the vertex
-                          if (distPrev < 15 || distNext < 15) {
-                            nextPoints.splice(idx, 2);
-                            if (nextPoints.length < 6) {
-                              props.onContextAction('delete', targetObj.id);
-                              return;
-                            }
-                          }
-
-                          props.onUpdateObject(targetObj.id, { points: nextPoints });
-                        }}
-                        onMouseEnter={(e) => {
-                          const stage = e.target.getStage();
-                          if (stage) stage.container().style.cursor = 'move';
-                        }}
-                        onMouseLeave={(e) => {
-                          const stage = e.target.getStage();
-                          if (stage) stage.container().style.cursor = 'default';
-                        }}
-                      />
-                    );
-
-                    // 2. Midpoint Handle (green circles) - splits segment into new vertex
-                    const nextIdx = (idx + 2) % pts.length;
-                    const nvx = pts[nextIdx];
-                    const nvy = pts[nextIdx + 1];
-                    const mx = (vx + nvx) / 2;
-                    const my = (vy + nvy) / 2;
-
-                    handles.push(
-                      <Circle
-                        key={`m-${idx}`}
-                        x={mx}
-                        y={my}
-                        radius={5}
-                        fill="#10b981"
-                        stroke="#ffffff"
-                        strokeWidth={1.5}
-                        opacity={0.8}
-                        draggable
-                        onDragEnd={(e) => {
-                          const newMx = e.target.x();
-                          const newMy = e.target.y();
-                          const nextPoints = [...pts];
-                          nextPoints.splice(idx + 2, 0, newMx, newMy);
-                          props.onUpdateObject(targetObj.id, { points: nextPoints });
-                        }}
-                        onMouseEnter={(e) => {
-                          const stage = e.target.getStage();
-                          if (stage) stage.container().style.cursor = 'pointer';
-                        }}
-                        onMouseLeave={(e) => {
-                          const stage = e.target.getStage();
-                          if (stage) stage.container().style.cursor = 'default';
-                        }}
-                      />
-                    );
-                  }
-                  return handles;
-                })()}
-              </Group>
+              <PolygonVertexHandles
+                targetObj={selectedObjects[0]}
+                stageRef={stageRef}
+                onUpdateObject={props.onUpdateObject}
+                onContextAction={props.onContextAction}
+              />
             )}
 
             {/* Safe Escape Route Glowing Flow Arrow Line */}
@@ -1575,203 +1005,15 @@ export function CanvasEditor(props: Props) {
 
             {/* Edge and Corner Resizers for base drawing canvas sheet */}
             {props.editMode && props.selectedIds.length === 0 && (
-              <Group>
-                {/* Left Edge Resizer */}
-                <Line
-                  points={[0, 0, 0, canvasHeight]}
-                  stroke={activeEdge === 'left' || (dragResizeBounds && activeEdge === 'left') ? '#3b82f6' : 'transparent'}
-                  strokeWidth={6}
-                  hitStrokeWidth={16}
-                  draggable
-                  onDragStart={() => setHoveredEdge('left')}
-                  onDragMove={(e) => {
-                    const node = e.target;
-                    const rawDx = node.x();
-                    const newW = Math.max(400, Math.min(10000, canvasWidth - rawDx));
-                    const constrainedDx = canvasWidth - newW;
-                    setDragResizeBounds({ x: constrainedDx, y: 0, w: newW, h: canvasHeight });
-                    node.y(0);
-                  }}
-                  onDragEnd={(e) => {
-                    const finalW = dragResizeBounds?.w ?? canvasWidth;
-                    const shiftX = canvasWidth - finalW;
-                    props.onCommitCanvasResize?.(finalW, canvasHeight, shiftX, 0);
-                    setDragResizeBounds(null);
-                    setHoveredEdge(null);
-                    const node = e.target;
-                    node.x(0);
-                    node.y(0);
-                  }}
-                  onMouseEnter={(e) => {
-                    setHoveredEdge('left');
-                    const stage = e.target.getStage();
-                    if (stage) stage.container().style.cursor = 'ew-resize';
-                  }}
-                  onMouseLeave={(e) => {
-                    setHoveredEdge('left');
-                    const stage = e.target.getStage();
-                    if (stage) stage.container().style.cursor = 'default';
-                  }}
-                />
-
-                {/* Right Edge Resizer */}
-                <Line
-                  points={[canvasWidth, 0, canvasWidth, canvasHeight]}
-                  stroke={activeEdge === 'right' || (dragResizeBounds && activeEdge === 'right') ? '#3b82f6' : 'transparent'}
-                  strokeWidth={6}
-                  hitStrokeWidth={16}
-                  draggable
-                  onDragStart={() => setHoveredEdge('right')}
-                  onDragMove={(e) => {
-                    const node = e.target;
-                    const rawDx = node.x();
-                    const newW = Math.max(400, Math.min(10000, canvasWidth + rawDx));
-                    setDragResizeBounds({ x: 0, y: 0, w: newW, h: canvasHeight });
-                    node.y(0);
-                  }}
-                  onDragEnd={(e) => {
-                    const finalW = dragResizeBounds?.w ?? canvasWidth;
-                    props.onCommitCanvasResize?.(finalW, canvasHeight, 0, 0);
-                    setDragResizeBounds(null);
-                    setHoveredEdge(null);
-                    const node = e.target;
-                    node.x(0);
-                    node.y(0);
-                  }}
-                  onMouseEnter={(e) => {
-                    setHoveredEdge('right');
-                    const stage = e.target.getStage();
-                    if (stage) stage.container().style.cursor = 'ew-resize';
-                  }}
-                  onMouseLeave={(e) => {
-                    setHoveredEdge(null);
-                    const stage = e.target.getStage();
-                    if (stage) stage.container().style.cursor = 'default';
-                  }}
-                />
-
-                {/* Top Edge Resizer */}
-                <Line
-                  points={[0, 0, canvasWidth, 0]}
-                  stroke={activeEdge === 'top' || (dragResizeBounds && activeEdge === 'top') ? '#3b82f6' : 'transparent'}
-                  strokeWidth={6}
-                  hitStrokeWidth={16}
-                  draggable
-                  onDragStart={() => setHoveredEdge('top')}
-                  onDragMove={(e) => {
-                    const node = e.target;
-                    const rawDy = node.y();
-                    const newH = Math.max(400, Math.min(10000, canvasHeight - rawDy));
-                    const constrainedDy = canvasHeight - newH;
-                    setDragResizeBounds({ x: 0, y: constrainedDy, w: canvasWidth, h: newH });
-                    node.x(0);
-                  }}
-                  onDragEnd={(e) => {
-                    const finalH = dragResizeBounds?.h ?? canvasHeight;
-                    const shiftY = canvasHeight - finalH;
-                    props.onCommitCanvasResize?.(canvasWidth, finalH, 0, shiftY);
-                    setDragResizeBounds(null);
-                    setHoveredEdge(null);
-                    const node = e.target;
-                    node.x(0);
-                    node.y(0);
-                  }}
-                  onMouseEnter={(e) => {
-                    setHoveredEdge('top');
-                    const stage = e.target.getStage();
-                    if (stage) stage.container().style.cursor = 'ns-resize';
-                  }}
-                  onMouseLeave={(e) => {
-                    setHoveredEdge(null);
-                    const stage = e.target.getStage();
-                    if (stage) stage.container().style.cursor = 'default';
-                  }}
-                />
-
-                {/* Bottom Edge Resizer */}
-                <Line
-                  points={[0, canvasHeight, canvasWidth, canvasHeight]}
-                  stroke={activeEdge === 'bottom' || (dragResizeBounds && activeEdge === 'bottom') ? '#3b82f6' : 'transparent'}
-                  strokeWidth={6}
-                  hitStrokeWidth={16}
-                  draggable
-                  onDragStart={() => setHoveredEdge('bottom')}
-                  onDragMove={(e) => {
-                    const node = e.target;
-                    const rawDy = node.y();
-                    const newH = Math.max(400, Math.min(10000, canvasHeight + rawDy));
-                    setDragResizeBounds({ x: 0, y: 0, w: canvasWidth, h: newH });
-                    node.x(0);
-                  }}
-                  onDragEnd={(e) => {
-                    const finalH = dragResizeBounds?.h ?? canvasHeight;
-                    props.onCommitCanvasResize?.(canvasWidth, finalH, 0, 0);
-                    setDragResizeBounds(null);
-                    setHoveredEdge(null);
-                    const node = e.target;
-                    node.x(0);
-                    node.y(0);
-                  }}
-                  onMouseEnter={(e) => {
-                    setHoveredEdge('bottom');
-                    const stage = e.target.getStage();
-                    if (stage) stage.container().style.cursor = 'ns-resize';
-                  }}
-                  onMouseLeave={(e) => {
-                    setHoveredEdge(null);
-                    const stage = e.target.getStage();
-                    if (stage) stage.container().style.cursor = 'default';
-                  }}
-                />
-
-                {/* Corner Resize Handle */}
-                <Group
-                  x={canvasWidth}
-                  y={canvasHeight}
-                  draggable
-                  onDragStart={() => setHoveredEdge('right')}
-                  onDragMove={(e) => {
-                    const node = e.target;
-                    const rawDx = node.x() - canvasWidth;
-                    const rawDy = node.y() - canvasHeight;
-                    const newW = Math.max(400, Math.min(10000, canvasWidth + rawDx));
-                    const newH = Math.max(400, Math.min(10000, canvasHeight + rawDy));
-                    setDragResizeBounds({ x: 0, y: 0, w: newW, h: newH });
-                  }}
-                  onDragEnd={(e) => {
-                    const finalW = dragResizeBounds?.w ?? canvasWidth;
-                    const finalH = dragResizeBounds?.h ?? canvasHeight;
-                    props.onCommitCanvasResize?.(finalW, finalH, 0, 0);
-                    setDragResizeBounds(null);
-                    setHoveredEdge(null);
-                    const node = e.target;
-                    node.x(canvasWidth);
-                    node.y(canvasHeight);
-                  }}
-                  onMouseEnter={(e) => {
-                    const stage = e.target.getStage();
-                    if (stage) stage.container().style.cursor = 'nwse-resize';
-                  }}
-                  onMouseLeave={(e) => {
-                    const stage = e.target.getStage();
-                    if (stage) stage.container().style.cursor = 'default';
-                  }}
-                >
-                  <Circle
-                    radius={10}
-                    fill="#3b82f6"
-                    stroke="#ffffff"
-                    strokeWidth={2}
-                    shadowColor="rgba(0, 0, 0, 0.25)"
-                    shadowBlur={6}
-                  />
-                  <Line
-                    points={[-3, 0, 0, -3, 3, 0]}
-                    stroke="#ffffff"
-                    strokeWidth={1.5}
-                  />
-                </Group>
-              </Group>
+              <SheetEdgeResizers
+                canvasWidth={canvasWidth}
+                canvasHeight={canvasHeight}
+                activeEdge={activeEdge}
+                setHoveredEdge={setHoveredEdge}
+                dragResizeBounds={dragResizeBounds}
+                setDragResizeBounds={setDragResizeBounds}
+                onCommitCanvasResize={props.onCommitCanvasResize}
+              />
             )}
 
             {/* Drag Resize Bounds Guide Box & Tooltip */}
@@ -1820,172 +1062,47 @@ export function CanvasEditor(props: Props) {
       </Stage>
 
       {/* Floating Zoom Controls (Figma Style) */}
-      <div
-        className={clsx(
-          'absolute left-1/2 bottom-4 -translate-x-1/2 z-10 flex items-center gap-1.5 p-1.5 rounded-2xl border shadow-xl backdrop-blur-md select-none transition-colors duration-300',
-          isDark ? 'bg-slate-900/90 border-slate-800 text-slate-350' : 'bg-white/90 border-slate-200 text-slate-700'
-        )}
-      >
-        <button
-          onClick={props.onZoomIn}
-          className={clsx(
-            'rounded-lg font-bold hover:bg-black/10 transition active:scale-95 text-xs flex items-center justify-center h-7 w-7',
-            isDark ? 'hover:text-white' : 'hover:text-slate-900'
-          )}
-          title="Zoom In"
-        >
-          +
-        </button>
-        <span className="text-[10px] font-bold px-1 min-w-[36px] text-center font-mono">
-          {Math.round(props.scale * 100)}%
-        </span>
-        <button
-          onClick={props.onZoomOut}
-          className={clsx(
-            'rounded-lg font-bold hover:bg-black/10 transition active:scale-95 text-xs flex items-center justify-center h-7 w-7',
-            isDark ? 'hover:text-white' : 'hover:text-slate-900'
-          )}
-          title="Zoom Out"
-        >
-          -
-        </button>
-        <span className={`h-4 w-px ${isDark ? 'bg-slate-805' : 'bg-slate-200'}`} />
-        <button
-          onClick={props.onFit}
-          className={clsx(
-            'px-2 py-1 rounded-lg text-[10px] font-bold hover:bg-black/10 transition active:scale-95 h-7 flex items-center justify-center',
-            isDark ? 'hover:text-white' : 'hover:text-slate-900'
-          )}
-        >
-          Fit
-        </button>
-        <button
-          onClick={props.onReset}
-          className={clsx(
-            'px-2 py-1 rounded-lg text-[10px] font-bold hover:bg-black/10 transition active:scale-95 h-7 flex items-center justify-center',
-            isDark ? 'hover:text-white' : 'hover:text-slate-900'
-          )}
-        >
-          100%
-        </button>
-      </div>
+      <ZoomControls
+        scale={props.scale}
+        isDark={isDark}
+        onZoomIn={props.onZoomIn}
+        onZoomOut={props.onZoomOut}
+        onFit={props.onFit}
+        onReset={props.onReset}
+      />
 
-      {props.editMode && selectedObjects.length > 0 && (
-        <div
-          className={clsx(
-            'absolute left-1/2 top-4 z-20 flex -translate-x-1/2 gap-2 rounded-2xl border p-2 text-xs shadow-xl transition-colors duration-300 items-center',
-            isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
-          )}
-        >
-          <span className="flex items-center px-1 font-semibold whitespace-nowrap">{selectedObjects.length} đã chọn</span>
-          <button
-            onClick={() => props.onContextAction('duplicate', selectedObjects[0].id)}
-            className={clsx(
-              'rounded-xl px-3 py-1.5 font-bold transition whitespace-nowrap',
-              isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-200' : 'bg-slate-100 hover:bg-slate-200 text-slate-750'
-            )}
-          >
-            Nhân đôi
-          </button>
-
-          {selectedObjects.length === 2 && (
-            <>
-              <button
-                onClick={() => props.onContextAction('connect_nodes', '')}
-                className="rounded-xl bg-blue-600 px-3 py-1.5 font-bold text-white hover:bg-blue-700 transition whitespace-nowrap"
-              >
-                Kết nối các nút
-              </button>
-              <button
-                onClick={() => props.onContextAction('find_path', '')}
-                className="rounded-xl bg-emerald-600 px-3 py-1.5 font-bold text-white hover:bg-emerald-700 transition whitespace-nowrap"
-              >
-                Tìm đường đi an toàn
-              </button>
-            </>
-          )}
-
-          <button
-            onClick={() => props.onContextAction('delete', selectedObjects[0].id)}
-            className="rounded-xl bg-rose-600 px-3 py-1.5 font-bold text-white hover:bg-rose-700 active:scale-95 whitespace-nowrap"
-          >
-            Xóa
-          </button>
-        </div>
+      {/* Floating Selection Actions Bar */}
+      {props.editMode && (
+        <SelectionToolbar
+          selectedObjects={selectedObjects}
+          isDark={isDark}
+          onContextAction={props.onContextAction}
+        />
       )}
 
       {/* Context Menu for right-click in Edit Mode */}
-      {contextMenu && (
-        <div
-          className={clsx(
-            'fixed z-50 w-44 rounded-2xl border p-2 shadow-2xl transition-colors duration-300',
-            isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
-          )}
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-        >
-          {['rename', 'duplicate', 'delete', 'front', 'back', 'lock'].map((action) => (
-            <button
-              key={action}
-              onClick={() => {
-                props.onContextAction(action, contextMenu.objectId);
-                setContextMenu(null);
-              }}
-              className={clsx(
-                'block w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition',
-                isDark ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-55'
-              )}
-            >
-              {action === 'front'
-                ? 'Bring to front'
-                : action === 'back'
-                  ? 'Send to back'
-                  : action.charAt(0).toUpperCase() + action.slice(1)}
-            </button>
-          ))}
-        </div>
-      )}
+      <ContextMenu
+        contextMenu={contextMenu}
+        setContextMenu={setContextMenu}
+        isDark={isDark}
+        onContextAction={props.onContextAction}
+      />
+
       {/* Inline Text Editor Overlay */}
-      {editingLabelId && (
-        <textarea
-          value={editingTextVal}
-          onChange={(e) => setEditingTextVal(e.target.value)}
-          onBlur={() => {
-            props.onUpdateObject(editingLabelId, { name: editingTextVal });
-            setEditingLabelId(null);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              props.onUpdateObject(editingLabelId, { name: editingTextVal });
-              setEditingLabelId(null);
-            }
-            if (e.key === 'Escape') {
-              setEditingLabelId(null);
-            }
-          }}
-          autoFocus
-          style={{
-            position: 'fixed',
-            left: `${inputPos.x}px`,
-            top: `${inputPos.y}px`,
-            width: `${inputPos.width}px`,
-            height: `${inputPos.height}px`,
-            transform: `rotate(${inputPos.rotation}deg)`,
-            transformOrigin: 'left top',
-            fontSize: `${(props.objects.find(o => o.id === editingLabelId)?.fontSize || 20) * props.scale}px`,
-            color: isDark ? '#f8fafc' : '#1e293b',
-            background: isDark ? '#1e293b' : '#ffffff',
-            border: '1.5px solid #3b82f6',
-            borderRadius: '6px',
-            padding: '2px',
-            outline: 'none',
-            zIndex: 100,
-            fontFamily: "'Inter', sans-serif",
-            fontWeight: 'bold',
-          }}
-        />
-      )}
+      <TextEditorOverlay
+        editingLabelId={editingLabelId}
+        setEditingLabelId={setEditingLabelId}
+        editingTextVal={editingTextVal}
+        setEditingTextVal={setEditingTextVal}
+        inputPos={inputPos}
+        scale={props.scale}
+        isDark={isDark}
+        objects={props.objects}
+        onUpdateObject={props.onUpdateObject}
+      />
     </div>
   );
 }
+
+export const CanvasEditor = React.memo(CanvasEditorComponent);
 export default CanvasEditor;

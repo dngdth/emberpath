@@ -103,7 +103,7 @@ export function DashboardPage() {
     );
 
     objects.forEach((obj) => {
-      if (obj.type === 'mq2' || obj.type === 'temp') {
+      if (obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp') {
         if (dangerDeviceIds.has(obj.id)) {
           dangerSensorPositions.push({ x: obj.x, y: obj.y });
         }

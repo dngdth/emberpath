@@ -354,6 +354,7 @@ export function PropertyPanel({
       </div>
 
       {/* 3. STYLE SECTION */}
+      {(object.type !== 'led_wire') && (
       <div className={`rounded-2xl border p-3 space-y-2.5 transition-colors duration-300 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
         <div className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-blue-500">
           <Palette size={12} />
@@ -361,34 +362,56 @@ export function PropertyPanel({
         </div>
 
         <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className={clsx('mb-0.5 block text-[10px]', labelClass)}>Màu sắc</label>
-            <div className="relative flex items-center">
-              <div 
-                className="absolute left-2 w-5 h-5 rounded-md border shadow-sm flex-shrink-0"
-                style={{ 
-                  backgroundColor: object.color || (isDark ? '#111827' : '#ffffff'),
-                  borderColor: isDark ? '#334155' : '#cbd5e1' 
-                }}
-              >
-                <input
-                  type="color"
-                  value={object.color && /^#[0-9A-F]{6}$/i.test(object.color) ? object.color : '#ffffff'}
-                  onChange={(e) => onChange({ color: e.target.value })}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          {!isSensor && (
+            <div>
+              <div className="flex items-center justify-between mb-0.5">
+                <label className={clsx('block text-[10px]', labelClass)}>Màu sắc</label>
+                {object.color && (
+                  <button 
+                    onClick={() => onChange({ color: undefined })}
+                    className="text-[9px] text-blue-500 hover:underline"
+                  >
+                    Mặc định
+                  </button>
+                )}
+              </div>
+              <div className="relative flex items-center">
+                <div 
+                  className="absolute left-2 w-5 h-5 rounded-md border shadow-sm flex-shrink-0"
+                  style={{ 
+                    backgroundColor: object.color || (isDark ? '#111827' : '#ffffff'),
+                    borderColor: isDark ? '#334155' : '#cbd5e1' 
+                  }}
+                >
+                  <input
+                    type="color"
+                    value={object.color && /^#[0-9A-F]{6}$/i.test(object.color) ? object.color : '#ffffff'}
+                    onChange={(e) => onChange({ color: e.target.value })}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  />
+                </div>
+                <DebouncedInput
+                  value={object.color || ''}
+                  onChange={(val) => onChange({ color: val })}
+                  placeholder="#ffffff"
+                  className={clsx(inputClass, 'pl-9 font-mono')}
                 />
               </div>
-              <DebouncedInput
-                value={object.color || ''}
-                onChange={(val) => onChange({ color: val })}
-                placeholder="#ffffff"
-                className={clsx(inputClass, 'pl-9 font-mono')}
-              />
             </div>
-          </div>
+          )}
 
-          <div>
-            <label className={clsx('mb-0.5 block text-[10px]', labelClass)}>Màu chữ</label>
+          <div className={clsx(isSensor && 'col-span-2')}>
+            <div className="flex items-center justify-between mb-0.5">
+              <label className={clsx('block text-[10px]', labelClass)}>Màu chữ</label>
+              {object.textColor && (
+                <button 
+                  onClick={() => onChange({ textColor: undefined })}
+                  className="text-[9px] text-blue-500 hover:underline"
+                >
+                  Mặc định
+                </button>
+              )}
+            </div>
             <div className="relative flex items-center">
               <div 
                 className="absolute left-2 w-5 h-5 rounded-md border shadow-sm flex-shrink-0"
@@ -439,6 +462,7 @@ export function PropertyPanel({
           )}
         </div>
       </div>
+      )}
 
       {/* 4. VISIBILITY & LOCK SWITCHES */}
       <div className="flex gap-2 pt-1.5">

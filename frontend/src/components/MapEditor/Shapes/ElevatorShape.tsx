@@ -17,7 +17,7 @@ export const ElevatorShape: React.FC<ElevatorShapeProps> = React.memo(({
 }) => {
   const width = object.width || 80;
   const height = object.height || 80;
-  const fill = '#e2e8f0';
+  const fill = object.color || '#e9f179';
 
   return (
     <Group {...commonProps}>
@@ -35,13 +35,13 @@ export const ElevatorShape: React.FC<ElevatorShapeProps> = React.memo(({
         strokeWidth={1.5}
       />
       <Text
-        text="🛗 Lift"
+        text={object.name || 'Thang máy'}
         width={width}
         align="center"
         y={height / 2 - 6}
         fontSize={11}
         fontStyle="bold"
-        fill={isDark ? '#cbd5e1' : '#475569'}
+        fill={object.textColor || (isDark ? '#003870' : '#003870')}
       />
       {object.target_floor_id && (
         <Text

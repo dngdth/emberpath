@@ -23,8 +23,8 @@ export const SensorShape: React.FC<SensorShapeProps> = React.memo(({
   commonProps,
   isHovered,
 }) => {
-  let badgeColor = isDark ? '#1e293b' : '#f1f5f9';
-  let strokeColor = isDark ? '#334155' : '#cbd5e1';
+  let badgeColor = isDark ? '#1e1b4b' : '#eef2ff';
+  let strokeColor = isDark ? '#6366f1' : '#818cf8';
 
   if (isDanger) {
     badgeColor = '#ef4444';
@@ -33,7 +33,7 @@ export const SensorShape: React.FC<SensorShapeProps> = React.memo(({
     badgeColor = '#f59e0b';
     strokeColor = '#fde68a';
   } else if (selected) {
-    strokeColor = '#3b82f6';
+    strokeColor = '#f472b6';
   }
 
   const isMq2 = object.type === 'mq2' || object.id.toLowerCase().includes('mq2');
@@ -60,45 +60,30 @@ export const SensorShape: React.FC<SensorShapeProps> = React.memo(({
       >
         <Circle
           name={isDanger ? 'danger-blink-sensor' : isWarning ? 'warning-blink-sensor' : undefined}
-          radius={22}
+          radius={24}
           x={22}
           y={22}
           fill={badgeColor}
           stroke={strokeColor}
-          strokeWidth={selected || isDanger || isWarning ? 2.5 : 1.5}
-          shadowColor={isDanger ? '#ef4444' : isWarning ? '#f59e0b' : ''}
-          shadowBlur={isDanger || isWarning ? 10 : 0}
+          strokeWidth={selected || isDanger || isWarning ? 3 : 2}
+          shadowColor={isDanger ? '#ef4444' : isWarning ? '#f59e0b' : selected ? '#f472b6' : strokeColor}
+          shadowBlur={isDanger || isWarning ? 15 : 6}
+          shadowOpacity={isDark ? 0.6 : 0.3}
         />
-        <Text text={icon} x={13} y={13} fontSize={16} />
+        <Text text={icon} x={11} y={11} fontSize={20} />
         <Text
           text={label}
-          x={-15}
-          y={48}
-          width={74}
+          x={-28}
+          y={52}
+          width={100}
           align="center"
-          fontSize={10}
+          fontSize={12}
           fontStyle="bold"
-          fill={isDark ? '#cbd5e1' : '#475569'}
+          fill={object.textColor || (isDark ? '#f8fafc' : '#1e293b')}
+          shadowColor={isDark ? '#000' : '#fff'}
+          shadowBlur={2}
         />
-        <Group x={-10} y={64}>
-          <Rect
-            width={64}
-            height={16}
-            fill={isDark ? '#0f172a' : '#ffffff'}
-            stroke={isDanger ? '#ef4444' : isWarning ? '#f59e0b' : isDark ? '#334155' : '#cbd5e1'}
-            strokeWidth={1}
-            cornerRadius={4}
-          />
-          <Text
-            text={valueStr}
-            width={64}
-            align="center"
-            y={3}
-            fontSize={9}
-            fontStyle="bold"
-            fill={isDanger ? '#ef4444' : isWarning ? '#f59e0b' : isDark ? '#38bdf8' : '#3b82f6'}
-          />
-        </Group>
+
       </Group>
     </Group>
   );

@@ -7,6 +7,20 @@ import { SensorDevice } from '../../types/sensor';
 import { getDefaultSize, isPointInPolygon } from '../../utils/geometryHelpers';
 import { StairsSymbol } from '../MapEditor/StairsSymbol';
 
+// Reuse shape components from editor
+import { FloorBaseShape } from '../MapEditor/Shapes/FloorBaseShape';
+import { RoomShape } from '../MapEditor/Shapes/RoomShape';
+import { DoorShape } from '../MapEditor/Shapes/DoorShape';
+import { ExitShape } from '../MapEditor/Shapes/ExitShape';
+import { StairsShape } from '../MapEditor/Shapes/StairsShape';
+import { ElevatorShape } from '../MapEditor/Shapes/ElevatorShape';
+import { WallShape } from '../MapEditor/Shapes/WallShape';
+import { SensorShape } from '../MapEditor/Shapes/SensorShape';
+import { LedWireShape } from '../MapEditor/Shapes/LedWireShape';
+import { LedShape } from '../MapEditor/Shapes/LedShape';
+import { ConnectorShape } from '../MapEditor/Shapes/ConnectorShape';
+import { LabelShape } from '../MapEditor/Shapes/LabelShape';
+
 interface Props {
   objects: FloorPlanObject[];
   sensors: SensorDevice[];
@@ -308,64 +322,33 @@ export function FloorPlanViewer({
     return points.length >= 4 ? points : null;
   }, [evacuationActive, safePath, objects]);
 
-  // Room rendering style mapper
-  const getRoomStyle = (room: FloorPlanObject) => {
-    const isDanger = dangerRooms.has(room.id);
-    const isSelected = selectedStartRoomId === room.id;
-    
-    if (isDanger) {
-      return {
-        fill: 'rgba(239, 68, 68, 0.45)',
-        stroke: '#ef4444',
-        strokeWidth: 3.5,
-        shadowColor: '#ef4444',
-        shadowBlur: 15,
-      };
-    }
 
-    if (isSelected) {
-      return {
-        fill: isDark ? 'rgba(59, 130, 246, 0.3)' : 'rgba(59, 130, 246, 0.15)',
-        stroke: '#3b82f6',
-        strokeWidth: 3,
-        shadowColor: '#3b82f6',
-        shadowBlur: 10,
-      };
-    }
 
-    const isLobby = room.name?.toLowerCase().includes('lobby');
-    if (isLobby) {
-      return {
-        fill: isDark ? '#1F2937' : '#f1f5f9',
-        stroke: isDark ? '#374151' : '#cbd5e1',
-        strokeWidth: 1.5,
-        shadowBlur: 0,
-        shadowColor: '',
-      };
-    }
-
-    return {
-      fill: isDark ? 'rgba(16, 185, 129, 0.12)' : 'rgba(16, 185, 129, 0.05)',
-      stroke: isDark ? '#10B981' : '#10b981',
-      strokeWidth: 1.5,
-      shadowBlur: 0,
-      shadowColor: '',
-    };
-  };
-
-  // Layering order: floor_base first, then others, then connectors
+  // Layering helper: sorted by visual hierarchy (floor_base at bottom, led_wire behind sensors, connector at top)
   const sortedObjects = useMemo(() => {
-    const bases = objects.filter((o) => o.type === 'floor_base');
-    const connectors = objects.filter((o) => o.type === 'connector');
-    const others = objects.filter((o) => o.type !== 'floor_base' && o.type !== 'connector');
-    return [...bases, ...others, ...connectors];
+    const order = [
+      'floor_base',
+      'led_wire',
+      'wall',
+      'stairs',
+      'elevator',
+      'exit',
+      'sensor',
+      'label',
+      'connector'
+    ];
+    return [...objects].sort((a, b) => {
+      const idxA = order.indexOf(a.type);
+      const idxB = order.indexOf(b.type);
+      const valA = idxA !== -1 ? idxA : 99;
+      const valB = idxB !== -1 ? idxB : 99;
+      return valA - valB;
+    });
   }, [objects]);
 
   // Render objects on Konva layer
   const renderObject = (obj: FloorPlanObject) => {
     if (obj.visible === false) return null;
-    const oW = obj.width || getDefaultSize(obj.type).width;
-    const oH = obj.height || getDefaultSize(obj.type).height;
 
     const commonProps = {
       key: obj.id,
@@ -387,378 +370,148 @@ export function FloorPlanViewer({
     };
 
     if (obj.type === 'floor_base') {
-      const isPolygon = obj.shapeType === 'polygon';
-      const pts = isPolygon ? obj.points || [] : [0, 0, oW, 0, oW, oH, 0, oH];
       return (
-        <Group {...commonProps}>
-          <Group
-            clipFunc={(ctx) => {
-              if (pts.length < 4) return;
-              ctx.beginPath();
-              ctx.moveTo(pts[0], pts[1]);
-              for (let i = 2; i < pts.length; i += 2) {
-                ctx.lineTo(pts[i], pts[i + 1]);
-              }
-              ctx.closePath();
-            }}
-          >
-            <Rect
-              x={0}
-              y={0}
-              width={isPolygon ? 4000 : oW}
-              height={isPolygon ? 4000 : oH}
-              fill={isDark ? 'rgba(30, 41, 59, 0.6)' : 'rgba(203, 213, 225, 0.5)'}
-            />
-          </Group>
-          <Line
-            points={pts}
-            closed={true}
-            stroke={isDark ? '#334155' : '#cbd5e1'}
-            strokeWidth={2}
-            listening={false}
-          />
-        </Group>
+        <FloorBaseShape
+          object={obj}
+          selected={false}
+          isDark={isDark}
+          commonProps={commonProps}
+        />
       );
     }
 
     if (obj.type === 'room') {
-      const style = getRoomStyle(obj);
       const isDanger = dangerRooms.has(obj.id);
-      const isPolygon = obj.shapeType === 'polygon';
-      const pts = obj.points || [];
-
       return (
-        <Group {...commonProps}>
-          {isPolygon && pts.length >= 6 ? (
-            <Line
-              name={isDanger ? "danger-blink" : undefined}
-              points={pts}
-              closed={true}
-              fill={style.fill}
-              stroke={style.stroke}
-              strokeWidth={style.strokeWidth}
-              shadowColor={style.shadowColor}
-              shadowBlur={style.shadowBlur}
-              shadowOpacity={0.6}
-            />
-          ) : (
-            <Rect
-              name={isDanger ? "danger-blink" : undefined}
-              width={oW}
-              height={oH}
-              fill={style.fill}
-              stroke={style.stroke}
-              strokeWidth={style.strokeWidth}
-              cornerRadius={16}
-              shadowColor={style.shadowColor}
-              shadowBlur={style.shadowBlur}
-              shadowOpacity={0.6}
-            />
-          )}
-          {/* Room Name */}
-          <Text
-            text={obj.name || 'Room'}
-            x={isPolygon ? pts[0] + 16 : 16}
-            y={isPolygon ? pts[1] + 16 : 14}
-            fontSize={15}
-            fontStyle="bold"
-            fill={isDanger ? '#ef4444' : isDark ? '#f8fafc' : '#334155'}
-          />
-
-          {/* Pulsing Danger Badge */}
-          {isDanger && (
-            <Group x={isPolygon ? pts[0] + 16 : 16} y={isPolygon ? pts[1] + 38 : 36}>
-              <Rect
-                width={80}
-                height={20}
-                fill="#ef4444"
-                cornerRadius={6}
-              />
-              <Text
-                text="⚠️ DANGER"
-                x={8}
-                y={5}
-                fontSize={10}
-                fontStyle="bold"
-                fill="#ffffff"
-              />
-            </Group>
-          )}
-        </Group>
+        <RoomShape
+          object={obj}
+          selected={selectedStartRoomId === obj.id}
+          isDark={isDark}
+          isRoomDanger={isDanger}
+          commonProps={commonProps}
+        />
       );
     }
 
     if (obj.type === 'door') {
       return (
-        <Group {...commonProps}>
-          <Rect
-            width={oW}
-            height={oH}
-            fill={isDark ? '#4b5563' : '#d9a36b'}
-            cornerRadius={4}
-          />
-        </Group>
+        <DoorShape
+          object={obj}
+          selected={false}
+          isDark={isDark}
+          commonProps={commonProps}
+        />
       );
     }
 
     if (obj.type === 'exit') {
       return (
-        <Group {...commonProps}>
-          <Rect
-            width={oW}
-            height={oH}
-            fill="#10b981"
-            stroke="#10b981"
-            strokeWidth={1.5}
-            cornerRadius={8}
-          />
-          <Text
-            text={obj.name || 'EXIT'}
-            width={oW}
-            align="center"
-            y={oH / 2 - 7}
-            fontStyle="bold"
-            fontSize={13}
-            fill="#ffffff"
-          />
-        </Group>
+        <ExitShape
+          object={obj}
+          selected={false}
+          commonProps={commonProps}
+        />
       );
     }
 
     if (obj.type === 'stairs') {
-      const stairStrokeColor = '#475569';
       return (
-        <Group {...commonProps}>
-          <Rect
-            width={oW}
-            height={oH}
-            stroke={stairStrokeColor}
-            strokeWidth={1.5}
-            cornerRadius={8}
-            fill={obj.color || '#cbd5e1'}
-          />
-          <StairsSymbol width={oW} height={oH} strokeColor={stairStrokeColor} strokeWidth={1.5} isDashed={false} />
-        </Group>
+        <StairsShape
+          object={obj}
+          selected={false}
+          isDark={isDark}
+          commonProps={commonProps}
+        />
       );
     }
 
     if (obj.type === 'elevator') {
       return (
-        <Group {...commonProps}>
-          <Rect
-            width={oW}
-            height={oH}
-            fill="#e2e8f0"
-            stroke="#cbd5e1"
-            strokeWidth={1.5}
-            cornerRadius={8}
-          />
-          <Line
-            points={[oW / 2, 4, oW / 2, oH - 4]}
-            stroke="#94a3b8"
-            strokeWidth={1.5}
-          />
-          <Text
-            text="🛗 Lift"
-            width={oW}
-            align="center"
-            y={oH / 2 - 7}
-            fontSize={11}
-            fontStyle="bold"
-            fill="#475569"
-          />
-        </Group>
+        <ElevatorShape
+          object={obj}
+          selected={false}
+          isDark={isDark}
+          commonProps={commonProps}
+        />
       );
     }
 
     if (obj.type === 'wall') {
-      const points = obj.points || [];
-      if (obj.shapeType === 'polygon' && points.length > 0) {
-        const strokeColor = obj.color || (isDark ? '#64748b' : '#94a3b8');
-        return (
-          <Group {...commonProps}>
-            {/* Outer border/casing line for visual definition */}
-            <Line
-              points={points}
-              stroke={isDark ? '#0f172a' : '#cbd5e1'}
-              strokeWidth={8}
-              lineJoin="round"
-              lineCap="round"
-              listening={false}
-            />
-            {/* Main core wall line */}
-            <Line
-              points={points}
-              stroke={strokeColor}
-              strokeWidth={5}
-              lineJoin="round"
-              lineCap="round"
-            />
-          </Group>
-        );
-      }
       return (
-        <Group {...commonProps}>
-          <Rect
-            width={oW}
-            height={oH}
-            fill="#64748b"
-            stroke="#cbd5e1"
-            strokeWidth={1}
-            cornerRadius={2}
-          />
-        </Group>
+        <WallShape
+          object={obj}
+          selected={false}
+          isDark={isDark}
+          commonProps={commonProps}
+        />
       );
     }
 
     if (obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp') {
       const isDanger = dangerDeviceIds.has(obj.id);
       const isWarning = warningDeviceIds.has(obj.id);
-      
-      let badgeColor = '#f1f5f9';
-      let strokeColor = '#cbd5e1';
-      let textColor = '#475569';
-
-      if (isDanger) {
-        badgeColor = '#ef4444';
-        strokeColor = '#fca5a5';
-        textColor = '#ffffff';
-      } else if (isWarning) {
-        badgeColor = '#f59e0b';
-        strokeColor = '#fde68a';
-        textColor = '#ffffff';
-      }
-
       const reading = sensorValues.get(obj.id);
-      const isMq2 = obj.type === 'mq2' || obj.id.toLowerCase().includes('mq2');
-      const isTemp = obj.type === 'temp' || obj.id.toLowerCase().includes('temp');
-      const icon = isMq2 ? '💨' : isTemp ? '🌡️' : '📡';
-      const label = `${obj.name || (isMq2 ? 'MQ2' : isTemp ? 'Temp' : 'Cảm biến')}`;
-      const valueStr = reading ? `${reading.val} ${reading.unit}` : '--';
 
       return (
-        <Group {...commonProps}>
-          <Circle
-            name={isDanger ? "danger-blink-sensor" : isWarning ? "warning-blink-sensor" : undefined}
-            radius={22}
-            x={22}
-            y={22}
-            fill={badgeColor}
-            stroke={strokeColor}
-            strokeWidth={2}
-            shadowColor={isDanger ? '#ef4444' : ''}
-            shadowBlur={isDanger ? 10 : 0}
-          />
-          <Text
-            text={icon}
-            x={13}
-            y={13}
-            fontSize={16}
-          />
-          <Text
-            text={label}
-            x={-15}
-            y={48}
-            width={74}
-            align="center"
-            fontSize={11}
-            fontStyle="bold"
-            fill={isDark ? '#cbd5e1' : '#475569'}
-          />
-          <Group x={-10} y={64}>
-            <Rect
-              width={64}
-              height={16}
-              fill={isDark ? '#0f172a' : '#f8fafc'}
-              stroke={isDanger ? '#ef4444' : isDark ? '#334155' : '#e2e8f0'}
-              strokeWidth={1}
-              cornerRadius={4}
-            />
-            <Text
-              text={valueStr}
-              width={64}
-              align="center"
-              y={3}
-              fontSize={9}
-              fontStyle="bold"
-              fill={isDanger ? '#ef4444' : isWarning ? '#f59e0b' : isDark ? '#38bdf8' : '#3b82f6'}
-            />
-          </Group>
-        </Group>
+        <SensorShape
+          object={obj}
+          selected={false}
+          isDark={isDark}
+          isDanger={isDanger}
+          isWarning={isWarning}
+          reading={reading}
+          commonProps={commonProps}
+        />
       );
     }
 
     if (obj.type === 'led_wire') {
-      const active = evacuationActive;
-      const points = obj.points || [];
-      const baseStroke = active ? '#10b981' : isDark ? '#334155' : '#cbd5e1';
-
       return (
-        <Group {...commonProps}>
-          <Line
-            points={points}
-            stroke={baseStroke}
-            strokeWidth={active ? 8 : 3}
-            lineJoin="round"
-            lineCap="round"
-            opacity={active ? 0.35 : 0.6}
-            shadowColor="#10b981"
-            shadowBlur={active ? 12 : 0}
-            shadowOpacity={active ? 0.8 : 0}
-          />
-          <Line
-            name={active ? 'active-led-wire' : undefined}
-            points={points}
-            stroke={active ? '#34d399' : isDark ? '#475569' : '#94a3b8'}
-            strokeWidth={active ? 3.5 : 1.5}
-            lineJoin="round"
-            lineCap="round"
-            dash={active ? [12, 10] : [5, 5]}
-            opacity={active ? 1.0 : 0.8}
-          />
-        </Group>
+        <LedWireShape
+          object={obj}
+          selected={false}
+          isDark={isDark}
+          active={evacuationActive}
+          commonProps={commonProps}
+        />
       );
     }
 
     if (obj.type === 'led') {
-      const isDanger = obj.nodeStatus === 'danger';
       return (
-        <Group {...commonProps}>
-          <Circle
-            radius={10}
-            fill={isDanger ? '#ef4444' : '#10b981'}
-            stroke="#ffffff"
-            strokeWidth={1.5}
-            shadowColor={isDanger ? '#ef4444' : '#10b981'}
-            shadowBlur={isDanger ? 8 : 4}
-          />
-        </Group>
+        <LedShape
+          object={obj}
+          selected={false}
+          commonProps={commonProps}
+        />
       );
     }
 
     if (obj.type === 'connector') {
       const fromNode = objects.find((o) => o.id === obj.fromNodeId);
       const toNode = objects.find((o) => o.id === obj.toNodeId);
-      if (!fromNode || !toNode) return null;
-
-      const fromSize = getDefaultSize(fromNode.type);
-      const toSize = getDefaultSize(toNode.type);
-
-      const fromX = fromNode.x + (fromNode.width || fromSize.width) / 2;
-      const fromY = fromNode.y + (fromNode.height || fromSize.height) / 2;
-      const toX = toNode.x + (toNode.width || toSize.width) / 2;
-      const toY = toNode.y + (toNode.height || toSize.height) / 2;
+      const wallObjects = objects.filter((o) => o.type === 'wall');
 
       return (
-        <Group {...commonProps} x={0} y={0}>
-          <Line
-            points={[fromX, fromY, toX, toY]}
-            stroke={isDark ? '#475569' : '#cbd5e1'}
-            strokeWidth={1.5}
-            dash={[5, 8]}
-            opacity={0.6}
-          />
-        </Group>
+        <ConnectorShape
+          object={obj}
+          selected={false}
+          isDark={isDark}
+          fromNode={fromNode}
+          toNode={toNode}
+          wallObjects={wallObjects}
+          commonProps={commonProps}
+        />
+      );
+    }
+
+    if (obj.type === 'label') {
+      return (
+        <LabelShape
+          object={obj}
+          isDark={isDark}
+          commonProps={commonProps}
+        />
       );
     }
 

@@ -3,17 +3,24 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 
 interface Props {
-  activeTab: 'dashboard' | 'editor' | 'history';
-  onChangeTab?: (tab: 'dashboard' | 'editor' | 'history') => void;
+  activeTab?: 'dashboard' | 'editor' | 'history';
   isDark: boolean;
   isOpen: boolean;
   onClose: () => void;
 }
 
-export function DashboardSidebar({ activeTab, onChangeTab, isDark, isOpen, onClose }: Props) {
+export function DashboardSidebar({ activeTab: propActiveTab, isDark, isOpen, onClose }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuthStore();
+
+  const activeTab = propActiveTab || (
+    location.pathname.startsWith('/editor')
+      ? 'editor'
+      : location.pathname.startsWith('/history')
+      ? 'history'
+      : 'dashboard'
+  );
 
   const menuItems = [
     {
@@ -21,7 +28,6 @@ export function DashboardSidebar({ activeTab, onChangeTab, isDark, isOpen, onClo
       label: 'Dashboard',
       icon: LayoutDashboard,
       onClick: () => {
-        if (onChangeTab) onChangeTab('dashboard');
         if (location.pathname !== '/dashboard') {
           navigate('/dashboard');
         }
@@ -35,8 +41,9 @@ export function DashboardSidebar({ activeTab, onChangeTab, isDark, isOpen, onClo
             label: 'Quản lý Sơ đồ',
             icon: Map,
             onClick: () => {
-              if (onChangeTab) onChangeTab('editor');
-              navigate('/editor');
+              if (location.pathname !== '/editor') {
+                navigate('/editor');
+              }
               onClose();
             },
           },
@@ -47,7 +54,9 @@ export function DashboardSidebar({ activeTab, onChangeTab, isDark, isOpen, onClo
       label: 'Bảng Dữ liệu Lịch sử',
       icon: History,
       onClick: () => {
-        if (onChangeTab) onChangeTab('history');
+        if (location.pathname !== '/history') {
+          navigate('/history');
+        }
         onClose();
       },
     },

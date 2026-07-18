@@ -9,7 +9,7 @@ export function SensorCard({ sensor }: { sensor: SensorDevice }) {
   return (
     <div
       className={clsx(
-        'rounded-2xl border p-4 shadow-sm',
+        'rounded-xl border p-4 shadow-sm',
         isDanger
           ? 'border-[#e4a39a] bg-[#fdeceb]'
           : 'border-[#b7ddc4] bg-[#edf8f0]',

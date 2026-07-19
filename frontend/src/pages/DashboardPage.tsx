@@ -4,6 +4,7 @@ import { useAuthStore } from '../store/authStore';
 import { useThemeStore } from '../store/themeStore';
 import { FloorItem, FloorPlanObject } from '../types/editor';
 import { SensorDevice } from '../types/sensor';
+
 import { useRealtimeSensors } from '../hooks/useRealtimeSensors';
 import { DashboardSidebar } from '../components/Dashboard/DashboardSidebar';
 import { FloorPlanViewer } from '../components/Dashboard/FloorPlanViewer';
@@ -33,7 +34,7 @@ export function DashboardPage() {
   const [search, setSearch] = useState('');
 
   // Pathfinding state
-  const [safePath, setSafePath] = useState<string[]>([]);
+  const [safePath, setSafePath] = useState<SafePathResult | null>(null);
   const [selectedStartRoomId, setSelectedStartRoomId] = useState<string | null>(null);
   const [evacuationActive, setEvacuationActive] = useState(false);
 
@@ -69,10 +70,7 @@ export function DashboardPage() {
           setObjects(plan.objects);
           setCanvasWidth(plan.canvas_width ?? 1600);
           setCanvasHeight(plan.canvas_height ?? 1000);
-          // Reset pathfinding states on floor switch
-          setSafePath([]);
           setSelectedStartRoomId(null);
-          setEvacuationActive(false);
         })
         .finally(() => {
           setLoadingPlan(false);
@@ -128,24 +126,30 @@ export function DashboardPage() {
   async function handleToggleEvacuation() {
     if (evacuationActive) {
       setEvacuationActive(false);
-      setSafePath([]);
+      setSafePath(null);
       return;
     }
 
     if (!selectedFloor) return;
 
-    // Determine start node
+    // Determine the node from which the evacuation gradient should be followed.
     let startId = selectedStartRoomId;
     if (!startId) {
-      // Prioritize starting from a room currently in danger
-      const dangerRoom = objects.find((o) => o.type === 'room' && dangerRooms.has(o.id));
-      if (dangerRoom) {
-        startId = dangerRoom.id;
+      const dangerDeviceIds = new Set(
+        allSensors.filter((sensor) => sensor.latest_status === 'danger').map((sensor) => sensor.device_id)
+      );
+      const sensorTypes = new Set(['sensor', 'mq2', 'temp']);
+      const dangerNode = objects.find((object) =>
+        sensorTypes.has(object.type)
+        && (dangerDeviceIds.has(object.id) || object.nodeStatus === 'danger')
+      );
+      if (dangerNode) {
+        startId = dangerNode.id;
       } else {
-        // Fallback to lobby or any first room
+        const firstSensor = objects.find((object) => sensorTypes.has(object.type));
         const lobby = objects.find((o) => o.type === 'room' && o.id.toLowerCase().includes('lobby'));
         const anyRoom = objects.find((o) => o.type === 'room');
-        startId = lobby?.id || anyRoom?.id || null;
+        startId = firstSensor?.id || lobby?.id || anyRoom?.id || null;
       }
     }
 
@@ -154,27 +158,15 @@ export function DashboardPage() {
       return;
     }
 
-    // Find exit node
-    const exitNode = objects.find((o) => o.type === 'exit');
-    if (!exitNode) {
-      alert('Không tìm thấy điểm thoát hiểm (EXIT) trên sơ đồ tầng này.');
-      return;
-    }
-
     setEvacuationActive(true);
 
     try {
-      const path = await floorsApi.findPath(selectedFloor, startId, exitNode.id);
+      const path = await floorsApi.findPath(selectedFloor, startId);
       setSafePath(path);
-    } catch (err) {
-      console.warn('Backend pathfinding unavailable. Falling back to layout routing...', err);
-      // Fallback: draw startRoom -> lobby (if exists) -> exit
-      const lobby = objects.find((o) => o.type === 'room' && o.id.toLowerCase().includes('lobby'));
-      if (lobby && lobby.id !== startId && lobby.id !== exitNode.id) {
-        setSafePath([startId, lobby.id, exitNode.id]);
-      } else {
-        setSafePath([startId, exitNode.id]);
-      }
+    } catch (err: any) {
+      setEvacuationActive(false);
+      setSafePath(null);
+      alert(err.response?.data?.detail || 'Không thể tạo trường chỉ dẫn trên mạng dây LED.');
     }
   }
 
@@ -183,7 +175,7 @@ export function DashboardPage() {
     setSelectedStartRoomId(roomId === selectedStartRoomId ? null : roomId);
     // Reset active path when start room changes
     setEvacuationActive(false);
-    setSafePath([]);
+    setSafePath(null);
   };
 
   // Helper to find which room contains a sensor (by checking coordinate bounding box)
@@ -373,6 +365,7 @@ export function DashboardPage() {
                       <option key={floor.id} value={floor.id}>
                         {floor.name}
                       </option>
+
                     ))}
                   </select>
                 </div>

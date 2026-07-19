@@ -447,16 +447,16 @@ export function PropertyPanel({
             </div>
           )}
 
-          {isLed && (
+          {(isLed || isSensor) && (
             <div className="col-span-2">
-              <label className={clsx('mb-0.5 block text-[10px]', labelClass)}>Trạng thái Led</label>
+              <label className={clsx('mb-0.5 block text-[10px] font-bold', labelClass)}>Trạng thái node</label>
               <select
                 value={object.nodeStatus || 'safe'}
                 onChange={(e) => onChange({ nodeStatus: e.target.value as 'safe' | 'danger' })}
                 className={inputClass}
               >
-                <option value="safe">✅ Safe (Xanh)</option>
-                <option value="danger">🚨 Danger (Đỏ)</option>
+                <option value="safe">✅ Safe — hoạt động bình thường</option>
+                <option value="danger">🚨 Danger — đang phát hiện cháy</option>
               </select>
             </div>
           )}

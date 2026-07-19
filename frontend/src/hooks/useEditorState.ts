@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { FloorPlanObject } from '../types/editor';
 import { createNewObject } from '../data/initialMockData';
 import { snapPosition } from '../utils/snapHelpers';
+import { getDefaultSize } from '../utils/geometryHelpers';
 
 export function useEditorState(objects: FloorPlanObject[], setObjects: (next: FloorPlanObject[]) => void) {
   const [activeTool, setActiveTool] = useState<string>('select');
@@ -60,14 +61,32 @@ export function useEditorState(objects: FloorPlanObject[], setObjects: (next: Fl
   }
 
   function createConnector(fromNodeId: string, toNodeId: string) {
+    const fromNode = objects.find((object) => object.id === fromNodeId);
+    const toNode = objects.find((object) => object.id === toNodeId);
+    if (!fromNode || !toNode) return;
+
+    const fromSize = getDefaultSize(fromNode.type);
+    const toSize = getDefaultSize(toNode.type);
+    const fromX = fromNode.x + (fromNode.width || fromSize.width) / 2;
+    const fromY = fromNode.y + (fromNode.height || fromSize.height) / 2;
+    const toX = toNode.x + (toNode.width || toSize.width) / 2;
+    const toY = toNode.y + (toNode.height || toSize.height) / 2;
+    const originX = Math.min(fromX, toX);
+    const originY = Math.min(fromY, toY);
+
     const connector: FloorPlanObject = {
-      id: `connector-${crypto.randomUUID()}`,
-      type: 'connector',
-      x: 0,
-      y: 0,
+      id: `led_wire-${crypto.randomUUID()}`,
+      type: 'led_wire',
+      name: 'Dây LED',
+      x: originX,
+      y: originY,
       fromNodeId,
       toNodeId,
-      locked: true,
+      points: [fromX - originX, fromY - originY, toX - originX, toY - originY],
+      shapeType: 'polygon',
+      color: '#64748b',
+      locked: false,
+      visible: true,
     };
     setObjects([...objects, connector]);
   }

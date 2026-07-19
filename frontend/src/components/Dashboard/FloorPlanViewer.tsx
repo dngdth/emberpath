@@ -23,9 +23,10 @@ import { ConnectorShape } from '../MapEditor/Shapes/ConnectorShape';
 import { LabelShape } from '../MapEditor/Shapes/LabelShape';
 
 interface Props {
+  floorId: number | null;
   objects: FloorPlanObject[];
   sensors: SensorDevice[];
-  safePath: string[];
+  safePath: SafePathResult | null;
   onRoomSelect?: (roomId: string) => void;
   selectedStartRoomId?: string | null;
   evacuationActive: boolean;
@@ -38,6 +39,7 @@ interface Props {
 }
 
 export function FloorPlanViewer({
+  floorId,
   objects,
   sensors,
   safePath,
@@ -120,7 +122,6 @@ export function FloorPlanViewer({
     return null;
   }, [hoveredSensorId, sensors, hoveredSensorObj]);
 
-  const safePathLineRef = useRef<Konva.Line | null>(null);
   const hasDraggedRef = useRef(false);
 
   const gridPattern = useMemo(() => {
@@ -415,20 +416,32 @@ export function FloorPlanViewer({
     return rooms;
   }, [objects, dangerDeviceIds]);
 
-  // 3. Process safe path coordinates
-  const safePathPoints = useMemo(() => {
-    if (!evacuationActive || !safePath || safePath.length < 2) return null;
-    const points: number[] = [];
-    safePath.forEach((id) => {
-      const node = objects.find((o) => o.id === id);
-      if (node) {
-        const size = getDefaultSize(node.type);
-        points.push(node.x + (node.width || size.width) / 2);
-        points.push(node.y + (node.height || size.height) / 2);
+  const activeWireDirections = useMemo(() => {
+    const directions = new Map<string, { reverse: boolean; status: 'safe' | 'danger' }>();
+    if (!evacuationActive) return directions;
+    for (const segment of safePath?.segments || []) {
+      if (segment.kind === 'led_wire' && segment.wire_id && segment.floor_id === floorId) {
+        directions.set(segment.wire_id, { reverse: segment.reverse, status: segment.status });
       }
-    });
-    return points.length >= 4 ? points : null;
-  }, [evacuationActive, safePath, objects]);
+    }
+    return directions;
+  }, [evacuationActive, floorId, safePath]);
+
+  const activeStairIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!evacuationActive) return ids;
+    for (const segment of safePath?.segments || []) {
+      if (segment.kind !== 'stairs') continue;
+      if (segment.from_floor_id === floorId) ids.add(segment.from_node_id);
+      if (segment.to_floor_id === floorId) ids.add(segment.to_node_id);
+    }
+    return ids;
+  }, [evacuationActive, floorId, safePath]);
+
+  const objectById = useMemo(
+    () => new Map(objects.map((object) => [object.id, object])),
+    [objects],
+  );
 
 
 
@@ -467,13 +480,13 @@ export function FloorPlanViewer({
       rotation: obj.rotation || 0,
       onClick: () => {
         if (hasDraggedRef.current) return;
-        if (obj.type === 'room' && onRoomSelect) {
+        if (['room', 'sensor', 'mq2', 'temp'].includes(obj.type) && onRoomSelect) {
           onRoomSelect(obj.id);
         }
       },
       onTap: () => {
         if (hasDraggedRef.current) return;
-        if (obj.type === 'room' && onRoomSelect) {
+        if (['room', 'sensor', 'mq2', 'temp'].includes(obj.type) && onRoomSelect) {
           onRoomSelect(obj.id);
         }
       },
@@ -545,6 +558,7 @@ export function FloorPlanViewer({
           object={obj}
           selected={false}
           isDark={isDark}
+          active={activeStairIds.has(obj.id)}
           commonProps={commonProps}
         />
       );
@@ -573,7 +587,7 @@ export function FloorPlanViewer({
     }
 
     if (obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp') {
-      const isDanger = dangerDeviceIds.has(obj.id);
+      const isDanger = dangerDeviceIds.has(obj.id) || obj.nodeStatus === 'danger';
       const isWarning = warningDeviceIds.has(obj.id);
       const reading = sensorValues.get(obj.id);
 
@@ -592,12 +606,17 @@ export function FloorPlanViewer({
     }
 
     if (obj.type === 'led_wire') {
+      const wireDirection = activeWireDirections.get(obj.id);
       return (
         <LedWireShape
           object={obj}
           selected={false}
           isDark={isDark}
-          active={evacuationActive}
+          active={wireDirection !== undefined}
+          reverse={wireDirection?.reverse ?? false}
+          status={wireDirection?.status}
+          fromNode={obj.fromNodeId ? objectById.get(obj.fromNodeId) : undefined}
+          toNode={obj.toNodeId ? objectById.get(obj.toNodeId) : undefined}
           commonProps={commonProps}
         />
       );
@@ -673,10 +692,6 @@ export function FloorPlanViewer({
       if (evacuationActive) {
         const timeDiff = frame.timeDiff;
         dashOffset = (dashOffset - (timeDiff * 0.05)) % 40;
-        if (safePathLineRef.current) {
-          safePathLineRef.current.dashOffset(dashOffset);
-        }
-
         const activeLedWires = stage.find('.active-led-wire');
         activeLedWires.forEach((node) => {
           (node as any).dashOffset(dashOffset);
@@ -706,7 +721,7 @@ export function FloorPlanViewer({
     return () => {
       anim.stop();
     };
-  }, [objects, dangerRooms, safePathPoints, evacuationActive]);
+  }, [objects, dangerRooms, activeWireDirections, evacuationActive, activeStairIds]);
 
   return (
     <div
@@ -910,6 +925,7 @@ export function FloorPlanViewer({
                 </Group>
               );
             })()}
+
           </Group>
         </Layer>
       </Stage>
@@ -988,7 +1004,13 @@ export function FloorPlanViewer({
       {evacuationActive && (
         <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/90 text-white text-xs font-bold rounded-lg shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-emerald-400">
           <ShieldCheck size={14} className="animate-bounce" />
-          <span>ĐƯỜNG THOÁT HIỂM ĐANG HOẠT ĐỘNG</span>
+          <span>
+            {safePath?.mode === 'fallback'
+              ? 'HƯỚNG TỚI VỊ TRÍ XA ĐÁM CHÁY'
+              : safePath?.mode === 'mixed'
+                ? 'CHỈ DẪN THOÁT HIỂM & VÙNG AN TOÀN'
+                : 'ĐƯỜNG THOÁT HIỂM ĐANG HOẠT ĐỘNG'}
+          </span>
         </div>
       )}
 

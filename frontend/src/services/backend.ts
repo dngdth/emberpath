@@ -1,5 +1,5 @@
 import { AuthResponse, User } from '../types/auth';
-import { FloorItem, FloorPlanObject, FloorPlanResponse } from '../types/editor';
+import { FloorItem, FloorPlanObject, FloorPlanResponse, SafePathResult } from '../types/editor';
 import { DashboardSummary, SensorDevice, SensorReading } from '../types/sensor';
 import api, { getApiBaseUrl } from '../utils/api';
 import { getToken } from '../utils/authHelpers';
@@ -11,6 +11,10 @@ export type FloorPlanSavePayload = {
   canvas_width: number;
   canvas_height: number;
   canvas_shape: NonNullable<FloorPlanResponse['canvas_shape']>;
+};
+
+export type BuildingFloorPlanSavePayload = FloorPlanSavePayload & {
+  floor_id: number;
 };
 
 export type SensorFilters = {
@@ -69,12 +73,14 @@ export const floorsApi = {
     const { data } = await api.put<FloorPlanResponse>(`/floors/${floorId}/plan`, payload);
     return data;
   },
-  async findPath(floorId: number, startNodeId: string, endNodeId: string) {
-    const params = new URLSearchParams({
-      start_node_id: startNodeId,
-      end_node_id: endNodeId,
-    });
-    const { data } = await api.get<string[]>(`/floors/${floorId}/path?${params.toString()}`);
+  async saveBuildingPlans(floors: BuildingFloorPlanSavePayload[]) {
+    const { data } = await api.put<FloorPlanResponse[]>('/floors/plans/bulk', { floors });
+    return data;
+  },
+  async findPath(floorId: number, startNodeId: string, endNodeId?: string) {
+    const params = new URLSearchParams({ start_node_id: startNodeId });
+    if (endNodeId) params.set('end_node_id', endNodeId);
+    const { data } = await api.get<SafePathResult>(`/floors/${floorId}/path?${params.toString()}`);
     return data;
   },
 };

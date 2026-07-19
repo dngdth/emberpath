@@ -38,3 +38,34 @@ export interface FloorPlanResponse {
   canvas_height?: number;
   canvas_shape?: 'rect' | 'l-shape' | 'polygon';
 }
+
+export interface SafePathNode {
+  floor_id: number;
+  floor_name: string;
+  node_id: string;
+  node_name?: string;
+  cost: number;
+}
+
+export interface SafePathSegment {
+  kind: 'led_wire' | 'stairs';
+  status: 'safe' | 'danger';
+  floor_id: number | null;
+  from_floor_id: number;
+  to_floor_id: number;
+  wire_id: string | null;
+  from_node_id: string;
+  to_node_id: string;
+  reverse: boolean;
+}
+
+export interface SafePathResult {
+  algorithm: 'gradient_field';
+  mode: 'exit' | 'fallback' | 'mixed' | 'target';
+  nodes: SafePathNode[];
+  segments: SafePathSegment[];
+  hazard_nodes: SafePathNode[];
+  destination_nodes: SafePathNode[];
+  total_hops: number;
+  convergence_iterations: number;
+}

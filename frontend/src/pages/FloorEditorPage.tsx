@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
-import { floorsApi } from '../services/backend';
+import { floorsApi, FloorPlanSavePayload } from '../services/backend';
 import { useAuthStore } from '../store/authStore';
 import { useThemeStore } from '../store/themeStore';
 import { CanvasEditor } from '../components/MapEditor/CanvasEditor';
@@ -14,7 +14,7 @@ import { useSelection } from '../hooks/useSelection';
 import { useZoomPan } from '../hooks/useZoomPan';
 import { useRealtimeSensors } from '../hooks/useRealtimeSensors';
 import { exportPlanToJson, importPlanFromJson } from '../utils/serialization';
-import { FloorItem, FloorPlanObject } from '../types/editor';
+import { FloorItem, FloorPlanObject, SafePathResult } from '../types/editor';
 import {
   Eye,
   Activity,
@@ -74,7 +74,7 @@ export function FloorEditorPage() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState('');
   const [editorViewport, setEditorViewport] = useState({ width: 1200, height: 780 });
-  const [safePath, setSafePath] = useState<string[]>([]);
+  const [safePath, setSafePath] = useState<SafePathResult | null>(null);
 
   // Modals visibility states
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -147,13 +147,27 @@ export function FloorEditorPage() {
 
   // Keep a stable ref to history.state to prevent stale state issues in deferred saves
   const objectsRef = useRef<FloorPlanObject[]>(history.state);
+  const floorDraftsRef = useRef<Map<number, FloorPlanSavePayload>>(new Map());
+  const loadedFloorIdRef = useRef<number | null>(null);
   useEffect(() => {
     objectsRef.current = history.state;
   }, [history.state]);
 
-  // Save current floor plan with a deferred callback to prevent text area blur race condition
+  // Preserve every opened floor while the user moves around the building.
+  useEffect(() => {
+    const floorId = loadedFloorIdRef.current;
+    if (!floorId || floorId !== activeFloorId) return;
+    floorDraftsRef.current.set(floorId, {
+      objects: history.state,
+      canvas_width: canvasWidth,
+      canvas_height: canvasHeight,
+      canvas_shape: canvasShape,
+    });
+  }, [activeFloorId, history.state, canvasWidth, canvasHeight, canvasShape]);
+
+  // Save the complete building with a deferred callback to prevent text-area blur races.
   const savePlan = useCallback(async () => {
-    if (!activeFloorId) return;
+    if (!activeFloorId || floors.length === 0) return;
     setSaving(true);
 
     // Force blur on the active element (e.g. inline textarea) to trigger state updates
@@ -164,21 +178,49 @@ export function FloorEditorPage() {
     // Delay slightly to let React finish batching the state updates
     setTimeout(async () => {
       try {
-        await floorsApi.savePlan(activeFloorId, {
+        floorDraftsRef.current.set(activeFloorId, {
           objects: objectsRef.current,
           canvas_width: canvasWidthRef.current,
           canvas_height: canvasHeightRef.current,
           canvas_shape: canvasShapeRef.current,
         });
-        setToast('Đã lưu sơ đồ thành công');
+
+        const missingFloors = floors.filter((floor) => !floorDraftsRef.current.has(floor.id));
+        const remotePlans = await Promise.all(
+          missingFloors.map((floor) => floorsApi.getPlan(floor.id)),
+        );
+        for (const plan of remotePlans) {
+          floorDraftsRef.current.set(plan.floor_id, {
+            objects: plan.objects,
+            canvas_width: plan.canvas_width ?? 1600,
+            canvas_height: plan.canvas_height ?? 1000,
+            canvas_shape: plan.canvas_shape ?? 'rect',
+          });
+        }
+
+        const savedPlans = await floorsApi.saveBuildingPlans(
+          floors.map((floor) => ({
+            floor_id: floor.id,
+            ...floorDraftsRef.current.get(floor.id)!,
+          })),
+        );
+        for (const plan of savedPlans) {
+          floorDraftsRef.current.set(plan.floor_id, {
+            objects: plan.objects,
+            canvas_width: plan.canvas_width ?? 1600,
+            canvas_height: plan.canvas_height ?? 1000,
+            canvas_shape: plan.canvas_shape ?? 'rect',
+          });
+        }
+        setToast(`Đã lưu toàn bộ tòa nhà (${savedPlans.length} tầng)`);
       } catch (err) {
         console.error('Failed to save plan:', err);
-        alert('Không thể lưu sơ đồ mặt bằng.');
+        alert('Không thể lưu toàn bộ sơ đồ tòa nhà. Không có tầng nào được lưu một phần.');
       } finally {
         setSaving(false);
       }
     }, 100);
-  }, [activeFloorId]);
+  }, [activeFloorId, floors]);
 
   // Load live sensor data for monitoring
   const { summary, mq2, temperature, loading: sensorsLoading, wsStatus } = useRealtimeSensors(
@@ -215,6 +257,11 @@ export function FloorEditorPage() {
   // Fetch plan of floor below when active floor changes
   useEffect(() => {
     if (floorBelow) {
+      const cached = floorDraftsRef.current.get(floorBelow.id);
+      if (cached) {
+        setBelowObjects(cached.objects);
+        return;
+      }
       floorsApi.getPlan(floorBelow.id)
         .then((plan) => {
           setBelowObjects(plan.objects);
@@ -371,31 +418,23 @@ export function FloorEditorPage() {
   useEffect(() => {
     if (editMode) return; // Automatic pathfinding disabled in Edit Mode
 
-    const exitNode = history.state.find((o) => o.type === 'exit');
-    if (!exitNode) {
-      setSafePath([]);
-      return;
-    }
-
-    const dangerRoom = history.state.find((o) => o.type === 'room' && dangerRooms.has(o.id));
-    if (dangerRoom && activeFloorId) {
-      floorsApi.findPath(activeFloorId, dangerRoom.id, exitNode.id)
+    const dangerNode = history.state.find((object) =>
+      (['sensor', 'mq2', 'temp'].includes(object.type)
+        && (dangerDeviceIds.has(object.id) || object.nodeStatus === 'danger'))
+      || (object.type === 'room' && dangerRooms.has(object.id))
+    );
+    if (dangerNode && activeFloorId) {
+      floorsApi.findPath(activeFloorId, dangerNode.id)
         .then((path) => {
           setSafePath(path);
         })
         .catch(() => {
-          // Fallback route
-          const lobby = history.state.find((o) => o.type === 'room' && o.id.toLowerCase().includes('lobby'));
-          if (lobby) {
-            setSafePath([dangerRoom.id, lobby.id, exitNode.id]);
-          } else {
-            setSafePath([dangerRoom.id, exitNode.id]);
-          }
+          setSafePath(null);
         });
     } else {
-      setSafePath([]);
+      setSafePath(null);
     }
-  }, [activeFloorId, editMode, dangerRooms, history.state]);
+  }, [activeFloorId, editMode, dangerDeviceIds, dangerRooms, history.state]);
 
   // Load floors list
   async function loadFloors() {
@@ -413,11 +452,22 @@ export function FloorEditorPage() {
   async function loadPlan(floorId: number) {
     setLoading(true);
     try {
-      const data = await floorsApi.getPlan(floorId);
-      setCanvasWidth(data.canvas_width ?? 1600);
-      setCanvasHeight(data.canvas_height ?? 1000);
-      setCanvasShape(data.canvas_shape ?? 'rect');
-      history.reset(data.objects);
+      let draft = floorDraftsRef.current.get(floorId);
+      if (!draft) {
+        const data = await floorsApi.getPlan(floorId);
+        draft = {
+          objects: data.objects,
+          canvas_width: data.canvas_width ?? 1600,
+          canvas_height: data.canvas_height ?? 1000,
+          canvas_shape: data.canvas_shape ?? 'rect',
+        };
+        floorDraftsRef.current.set(floorId, draft);
+      }
+      loadedFloorIdRef.current = floorId;
+      setCanvasWidth(draft.canvas_width);
+      setCanvasHeight(draft.canvas_height);
+      setCanvasShape(draft.canvas_shape);
+      history.reset(draft.objects);
       selection.clearSelection();
       setTimeout(() => {
         zoomPan.resetView(editorViewport);
@@ -442,6 +492,7 @@ export function FloorEditorPage() {
     if (!floorToDelete) return;
     try {
       await floorsApi.remove(floorToDelete.id);
+      floorDraftsRef.current.delete(floorToDelete.id);
       setFloors((current) => current.filter((f) => f.id !== floorToDelete.id));
       if (activeFloorId === floorToDelete.id) {
         const remaining = floors.filter((f) => f.id !== floorToDelete.id);
@@ -708,6 +759,7 @@ export function FloorEditorPage() {
               <CanvasEditor
                 canvasWidth={canvasWidth}
                 canvasHeight={canvasHeight}
+                floorId={activeFloorId}
                 onUpdateCanvasSize={handleUpdateCanvasSize}
                 onCommitCanvasResize={handleCommitCanvasResize}
                 safePath={safePath}

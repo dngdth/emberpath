@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { floorsApi } from '../services/backend';
 import { useAuthStore } from '../store/authStore';
 import { useThemeStore } from '../store/themeStore';
-import { FloorItem, FloorPlanObject } from '../types/editor';
+import { FloorItem, FloorPlanObject, SafePathResult } from '../types/editor';
 import { SensorDevice } from '../types/sensor';
 
 import { useRealtimeSensors } from '../hooks/useRealtimeSensors';
@@ -205,7 +205,7 @@ export function DashboardPage() {
           setSelectedStartRoomId(sensorObj.id);
         }
         setEvacuationActive(false);
-        setSafePath([]);
+        setSafePath(null);
       }
       setPendingFocusSensorId(null);
     }
@@ -397,6 +397,7 @@ export function DashboardPage() {
               </div>
             ) : (
               <FloorPlanViewer
+                floorId={selectedFloor}
                 objects={objects}
                 sensors={allSensors}
                 safePath={safePath}

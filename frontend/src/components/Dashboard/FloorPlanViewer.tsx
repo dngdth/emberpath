@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import Konva from 'konva';
 import { Circle, Group, Layer, Line, Rect, Stage, Text } from 'react-konva';
 import { ZoomIn, ZoomOut, Maximize, RefreshCw, AlertTriangle, ShieldCheck, Lock, Unlock, MousePointer } from 'lucide-react';
-import { FloorPlanObject, FloorItem } from '../../types/editor';
+import { FloorPlanObject, FloorItem, SafePathResult } from '../../types/editor';
 import { SensorDevice } from '../../types/sensor';
 import { getDefaultSize, isPointInPolygon } from '../../utils/geometryHelpers';
 import { StairsSymbol } from '../MapEditor/StairsSymbol';
@@ -474,7 +474,6 @@ export function FloorPlanViewer({
     const isSensorType = obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp';
 
     const commonProps = {
-      key: obj.id,
       x: obj.x,
       y: obj.y,
       rotation: obj.rotation || 0,
@@ -793,23 +792,9 @@ export function FloorPlanViewer({
             scaleY={scale}
           >
             {/* Render all structural objects (Layered bases first) */}
-            {sortedObjects.map(renderObject)}
-
-            {/* Evacuation Flow Route (High Fidelity Green Glowing Arrow Path) */}
-            {safePathPoints && (
-              <Line
-                ref={safePathLineRef}
-                points={safePathPoints}
-                stroke="#10b981"
-                strokeWidth={7}
-                lineJoin="round"
-                lineCap="round"
-                dash={[20, 15]}
-                shadowColor="#10b981"
-                shadowBlur={16}
-                shadowOpacity={0.9}
-              />
-            )}
+            {sortedObjects.map((object) => (
+              <Fragment key={object.id}>{renderObject(object)}</Fragment>
+            ))}
 
             {/* Hover Tooltip for Sensors */}
             {hoveredSensorObj && hoveredSensorData && (() => {

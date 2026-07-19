@@ -5,6 +5,7 @@ import { RegisterPage } from '../pages/RegisterPage';
 import { DashboardPage } from '../pages/DashboardPage';
 import { FloorEditorPage } from '../pages/FloorEditorPage';
 import { LandingPage } from '../pages/LandingPage';
+import { HistoryPage } from '../pages/HistoryPage';
 
 function ProtectedRoute({ children, adminOnly }: { children: JSX.Element; adminOnly?: boolean }) {
   const { token, user } = useAuthStore();
@@ -20,6 +21,7 @@ export function AppRouter() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+      <Route path="/history" element={<ProtectedRoute><HistoryPage /></ProtectedRoute>} />
       <Route path="/editor" element={<ProtectedRoute adminOnly><FloorEditorPage /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

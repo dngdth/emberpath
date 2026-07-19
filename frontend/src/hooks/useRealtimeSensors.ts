@@ -14,6 +14,7 @@ export function useRealtimeSensors(selectedFloor?: number | null, search?: strin
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [mq2, setMq2] = useState<SensorDevice[]>([]);
   const [temperature, setTemperature] = useState<SensorDevice[]>([]);
+  const [dangerSensors, setDangerSensors] = useState<SensorDevice[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
@@ -27,14 +28,21 @@ export function useRealtimeSensors(selectedFloor?: number | null, search?: strin
 
   // Fetch am tham - khong set loading (WebSocket background refresh)
   async function refreshData() {
-    const [summaryData, mq2Data, tempData] = await Promise.all([
+    const [summaryData, mq2Data, tempData, allMq2Data, allTempData] = await Promise.all([
       sensorsApi.dashboardSummary(),
       sensorsApi.mq2(filters),
       sensorsApi.temperature(filters),
+      sensorsApi.mq2({ floorId: null }),
+      sensorsApi.temperature({ floorId: null }),
     ]);
     setSummary(summaryData);
     setMq2(mq2Data.filter((s) => REAL_DEVICE_IDS.has(s.device_id)));
     setTemperature(tempData.filter((s) => REAL_DEVICE_IDS.has(s.device_id)));
+
+    const allMq2Filtered = allMq2Data.filter((s) => REAL_DEVICE_IDS.has(s.device_id));
+    const allTempFiltered = allTempData.filter((s) => REAL_DEVICE_IDS.has(s.device_id));
+    const danger = [...allMq2Filtered, ...allTempFiltered].filter(s => s.latest_status === 'danger');
+    setDangerSensors(danger);
   }
 
   // Fetch co loading - dung lan dau hoac khi doi bo loc
@@ -101,5 +109,5 @@ export function useRealtimeSensors(selectedFloor?: number | null, search?: strin
     };
   }, [filters]);
 
-  return { summary, mq2, temperature, loading, wsStatus, refresh: fetchAll };
+  return { summary, mq2, temperature, dangerSensors, loading, wsStatus, refresh: fetchAll };
 }

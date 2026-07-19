@@ -20,7 +20,7 @@ export const FloorBaseShape: React.FC<FloorBaseShapeProps> = React.memo(({
   const height = object.height || 400;
   const isPolygon = object.shapeType === 'polygon';
   const pts = isPolygon ? object.points || [] : [0, 0, width, 0, width, height, 0, height];
-  const fill = object.color || (isDark ? '#dde7f8' : '#dde7f8');
+  const fill = object.color || (isDark ? '#1e293b' : '#dde7f8');
 
   return (
     <Group {...commonProps}>

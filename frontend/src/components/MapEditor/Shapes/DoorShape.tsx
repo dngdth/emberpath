@@ -17,7 +17,7 @@ export const DoorShape: React.FC<DoorShapeProps> = React.memo(({
 }) => {
   const width = object.width || 60;
   const height = object.height || 60;
-  const fill = '#d9a36b';
+  const fill = object.color || '#d9a36b';
 
   return (
     <Group {...commonProps}>

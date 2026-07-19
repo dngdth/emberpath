@@ -16,7 +16,7 @@ export const WallShape: React.FC<WallShapeProps> = React.memo(({
   commonProps,
 }) => {
   const points = object.points || [];
-  const fill = '#64748b';
+  const fill = object.color || '#64748b';
 
   // Polyline wall drawing
   if (object.shapeType === 'polygon' && points.length > 0) {

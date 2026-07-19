@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Konva from 'konva';
 import { Circle, Group, Layer, Line, Rect, Stage, Text } from 'react-konva';
-import { ZoomIn, ZoomOut, Maximize, RefreshCw, AlertTriangle, ShieldCheck } from 'lucide-react';
-import { FloorPlanObject } from '../../types/editor';
+import { ZoomIn, ZoomOut, Maximize, RefreshCw, AlertTriangle, ShieldCheck, Lock, Unlock, MousePointer } from 'lucide-react';
+import { FloorPlanObject, FloorItem } from '../../types/editor';
 import { SensorDevice } from '../../types/sensor';
 import { getDefaultSize, isPointInPolygon } from '../../utils/geometryHelpers';
 import { StairsSymbol } from '../MapEditor/StairsSymbol';
+import { DangerSensorsPanel } from './DangerSensorsPanel';
 
 // Reuse shape components from editor
 import { FloorBaseShape } from '../MapEditor/Shapes/FloorBaseShape';
@@ -31,6 +32,9 @@ interface Props {
   isDark: boolean;
   canvasWidth?: number;
   canvasHeight?: number;
+  dangerSensors: SensorDevice[];
+  floors: FloorItem[];
+  onSelectDangerSensor?: (sensor: SensorDevice) => void;
 }
 
 export function FloorPlanViewer({
@@ -43,6 +47,9 @@ export function FloorPlanViewer({
   isDark,
   canvasWidth,
   canvasHeight,
+  dangerSensors,
+  floors,
+  onSelectDangerSensor,
 }: Props) {
   const w = canvasWidth ?? 1600;
   const h = canvasHeight ?? 1000;
@@ -56,6 +63,62 @@ export function FloorPlanViewer({
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [panOrigin, setPanOrigin] = useState({ x: 0, y: 0 });
+  const [isFocused, setIsFocused] = useState(false);
+  const [hoveredSensorId, setHoveredSensorId] = useState<string | null>(null);
+
+  const longPressTimerRef = useRef<any>(null);
+
+  const handleTouchStart = (objId: string) => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+    }
+    longPressTimerRef.current = setTimeout(() => {
+      setHoveredSensorId(objId);
+    }, 500);
+  };
+
+  const handleTouchEnd = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    setHoveredSensorId(null);
+  };
+
+  const handleTouchMove = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const hoveredSensorObj = useMemo(() => {
+    if (!hoveredSensorId) return null;
+    return objects.find((o) => o.id === hoveredSensorId) || null;
+  }, [hoveredSensorId, objects]);
+
+  const hoveredSensorData = useMemo(() => {
+    if (!hoveredSensorId) return null;
+    const found = sensors.find((s) => s.device_id === hoveredSensorId);
+    if (found) return found;
+
+    // Fallback info for mock/unlinked sensors
+    if (hoveredSensorObj) {
+      const isMq2 = hoveredSensorObj.type === 'mq2' || hoveredSensorObj.id.toLowerCase().includes('mq2');
+      const isTemp = hoveredSensorObj.type === 'temp' || hoveredSensorObj.id.toLowerCase().includes('temp');
+      return {
+        device_id: hoveredSensorObj.id,
+        name: hoveredSensorObj.name || (isMq2 ? 'CB Khói MQ2' : isTemp ? 'CB Nhiệt độ' : 'Cảm biến'),
+        sensor_type: isMq2 ? 'mq2' : 'temp',
+        latest_value: 0,
+        threshold: isMq2 ? 100 : 60,
+        latest_status: 'safe',
+        unit: isMq2 ? 'ppm' : '°C',
+        room_name: null,
+      } as any;
+    }
+    return null;
+  }, [hoveredSensorId, sensors, hoveredSensorObj]);
 
   const safePathLineRef = useRef<Konva.Line | null>(null);
   const hasDraggedRef = useRef(false);
@@ -164,11 +227,54 @@ export function FloorPlanViewer({
     });
   };
 
+  // Click outside to defocus
   useEffect(() => {
-    if (objects.length > 0 && viewport.width > 800) {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setIsFocused(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
+  }, []);
+
+  // Escape key to lock map
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFocused) {
+        setIsFocused(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isFocused]);
+
+  // Center/Zoom or Reset View reactively
+  useEffect(() => {
+    if (objects.length === 0) return;
+    if (selectedStartRoomId) {
+      const obj = objects.find((o) => o.id === selectedStartRoomId);
+      if (obj) {
+        const objW = obj.width || 40;
+        const objH = obj.height || 40;
+        const targetX = obj.x + objW / 2;
+        const targetY = obj.y + objH / 2;
+        const targetScale = 1.2;
+        setScale(targetScale);
+        setPosition({
+          x: Math.round(viewport.width / 2 - targetX * targetScale),
+          y: Math.round(viewport.height / 2 - targetY * targetScale),
+        });
+        setIsFocused(true);
+      }
+    } else {
       handleResetView();
     }
-  }, [objects.length, viewport.width]);
+  }, [objects, selectedStartRoomId, viewport.width, viewport.height]);
 
   // Zoom controls
   const handleZoom = (factor: number) => {
@@ -189,6 +295,7 @@ export function FloorPlanViewer({
 
   // Mouse drag panning
   const handleMouseDown = (e: any) => {
+    if (!isFocused) return;
     setIsPanning(true);
     hasDraggedRef.current = false;
     setPanStart({ x: e.evt.clientX, y: e.evt.clientY });
@@ -196,7 +303,7 @@ export function FloorPlanViewer({
   };
 
   const handleMouseMove = (e: any) => {
-    if (!isPanning) return;
+    if (!isFocused || !isPanning) return;
     const dx = e.evt.clientX - panStart.x;
     const dy = e.evt.clientY - panStart.y;
     if (Math.hypot(dx, dy) > 3) {
@@ -213,6 +320,7 @@ export function FloorPlanViewer({
   };
 
   const handleWheel = (e: any) => {
+    if (!isFocused) return;
     e.evt.preventDefault();
     const stage = stageRef.current;
     if (!stage) return;
@@ -350,6 +458,8 @@ export function FloorPlanViewer({
   const renderObject = (obj: FloorPlanObject) => {
     if (obj.visible === false) return null;
 
+    const isSensorType = obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp';
+
     const commonProps = {
       key: obj.id,
       x: obj.x,
@@ -367,6 +477,21 @@ export function FloorPlanViewer({
           onRoomSelect(obj.id);
         }
       },
+      onMouseEnter: isSensorType
+        ? () => setHoveredSensorId(obj.id)
+        : undefined,
+      onMouseLeave: isSensorType
+        ? () => setHoveredSensorId(null)
+        : undefined,
+      onTouchStart: isSensorType
+        ? () => handleTouchStart(obj.id)
+        : undefined,
+      onTouchEnd: isSensorType
+        ? () => handleTouchEnd()
+        : undefined,
+      onTouchMove: isSensorType
+        ? () => handleTouchMove()
+        : undefined,
     };
 
     if (obj.type === 'floor_base') {
@@ -460,6 +585,7 @@ export function FloorPlanViewer({
           isDanger={isDanger}
           isWarning={isWarning}
           reading={reading}
+          isHovered={hoveredSensorId === obj.id}
           commonProps={commonProps}
         />
       );
@@ -585,14 +711,24 @@ export function FloorPlanViewer({
   return (
     <div
       ref={wrapperRef}
-      className={`relative w-full h-[520px] overflow-hidden rounded-[24px] border shadow-soft transition-all duration-300 ${
+      onClick={() => {
+        if (!isFocused) setIsFocused(true);
+      }}
+      className={`relative w-full h-[520px] overflow-hidden rounded-xl border shadow-soft transition-all duration-300 ${
         isDark
           ? 'bg-[#0F172A] border-slate-800'
           : 'bg-slate-50 border-slate-200'
+      } ${
+        isFocused
+          ? isDark
+            ? 'ring-[3px] ring-blue-500/40 border-blue-500 shadow-[0_0_25px_rgba(59,130,246,0.25)]'
+            : 'ring-[3px] ring-blue-600/40 border-blue-600 shadow-[0_0_25px_rgba(37,99,235,0.25)]'
+          : ''
       }`}
       style={{ cursor: isPanning ? 'grabbing' : 'default' }}
       onMouseLeave={handleMouseUp}
     >
+
       <Stage
         ref={stageRef}
         width={viewport.width}
@@ -659,12 +795,140 @@ export function FloorPlanViewer({
                 shadowOpacity={0.9}
               />
             )}
+
+            {/* Hover Tooltip for Sensors */}
+            {hoveredSensorObj && hoveredSensorData && (() => {
+              const isLinked = sensors.some((s) => s.device_id === hoveredSensorId);
+              const isMq2 = hoveredSensorData.sensor_type === 'mq2';
+              
+              const tooltipWidth = 190;
+              const tooltipHeight = 96;
+              
+              const strokeColor = !isLinked
+                ? (isDark ? '#475569' : '#cbd5e1')
+                : hoveredSensorData.latest_status === 'danger'
+                ? '#ef4444'
+                : hoveredSensorData.latest_value >= hoveredSensorData.threshold * 0.8
+                ? '#f59e0b'
+                : isDark
+                ? '#334155'
+                : '#cbd5e1';
+
+              const statusText = !isLinked
+                ? 'CHƯA LIÊN KẾT 📡'
+                : hoveredSensorData.latest_status === 'danger'
+                ? 'NGUY HIỂM 🚨'
+                : hoveredSensorData.latest_value >= hoveredSensorData.threshold * 0.8
+                ? 'CẢNH BÁO ⚠️'
+                : 'AN TOÀN ✅';
+
+              const statusColor = !isLinked
+                ? (isDark ? '#94a3b8' : '#64748b')
+                : hoveredSensorData.latest_status === 'danger'
+                ? '#ef4444'
+                : hoveredSensorData.latest_value >= hoveredSensorData.threshold * 0.8
+                ? '#d97706'
+                : '#10b981';
+
+              const valueText = isLinked
+                ? `Chỉ số: ${hoveredSensorData.latest_value} ${hoveredSensorData.unit} / ${hoveredSensorData.threshold} ${hoveredSensorData.unit}`
+                : `Chỉ số: -- / Ngưỡng: ${hoveredSensorData.threshold} ${hoveredSensorData.unit}`;
+
+              const valueColor = !isLinked
+                ? (isDark ? '#94a3b8' : '#64748b')
+                : hoveredSensorData.latest_status === 'danger'
+                ? '#ef4444'
+                : hoveredSensorData.latest_value >= hoveredSensorData.threshold * 0.8
+                ? '#f59e0b'
+                : isDark
+                ? '#38bdf8'
+                : '#2563eb';
+
+              return (
+                <Group
+                  x={hoveredSensorObj.x + 22 - tooltipWidth / 2}
+                  y={hoveredSensorObj.y - tooltipHeight - 14}
+                  listening={false}
+                >
+                  <Rect
+                    width={tooltipWidth}
+                    height={tooltipHeight}
+                    fill={isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)'}
+                    stroke={strokeColor}
+                    strokeWidth={1.5}
+                    cornerRadius={8}
+                    shadowColor="rgba(0, 0, 0, 0.3)"
+                    shadowBlur={12}
+                    shadowOffset={{ x: 0, y: 4 }}
+                    shadowOpacity={0.4}
+                  />
+                  <Text
+                    text={hoveredSensorData.name}
+                    x={10}
+                    y={10}
+                    fontSize={12}
+                    fontStyle="bold"
+                    fill={isDark ? '#f8fafc' : '#0f172a'}
+                  />
+                  <Text
+                    text={`${
+                      isMq2 ? '💨 Khói (MQ2)' : '🌡️ Nhiệt độ'
+                    } • ID: ${hoveredSensorData.device_id.slice(0, 8)}`}
+                    x={10}
+                    y={26}
+                    fontSize={9}
+                    fill={isDark ? '#94a3b8' : '#64748b'}
+                  />
+                  <Line
+                    points={[10, 40, 180, 40]}
+                    stroke={isDark ? '#334155' : '#e2e8f0'}
+                    strokeWidth={1}
+                  />
+                  <Text
+                    text={valueText}
+                    x={10}
+                    y={46}
+                    fontSize={10}
+                    fontStyle="bold"
+                    fill={valueColor}
+                  />
+                  <Text
+                    text={`Tình trạng: ${statusText}`}
+                    x={10}
+                    y={60}
+                    fontSize={10}
+                    fontStyle="bold"
+                    fill={statusColor}
+                  />
+                  <Text
+                    text={`Vị trí: ${hoveredSensorData.room_name || 'Chưa xác định'}`}
+                    x={10}
+                    y={75}
+                    fontSize={9}
+                    fill={isDark ? '#64748b' : '#94a3b8'}
+                  />
+                </Group>
+              );
+            })()}
           </Group>
         </Layer>
       </Stage>
 
       {/* Dynamic Controls panel overlays */}
       <div className="absolute top-4 right-4 z-20 flex flex-col gap-2">
+        <button
+          onClick={() => setIsFocused(!isFocused)}
+          className={`p-2.5 rounded-xl border flex items-center justify-center transition-all ${
+            isFocused
+              ? 'bg-blue-600 border-blue-500 hover:bg-blue-700 text-white shadow-md shadow-blue-500/25'
+              : isDark
+                ? 'bg-[#1E293B] border-slate-700 hover:bg-slate-800 text-white'
+                : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-800'
+          }`}
+          title={isFocused ? 'Khóa Sơ đồ' : 'Tương tác Sơ đồ'}
+        >
+          {isFocused ? <Unlock size={16} /> : <Lock size={16} />}
+        </button>
         <button
           onClick={() => handleZoom(1.2)}
           className={`p-2.5 rounded-xl border flex items-center justify-center transition-all ${
@@ -702,15 +966,19 @@ export function FloorPlanViewer({
 
       {/* Selected room helper or guides */}
       <div
-        className={`absolute bottom-4 left-4 z-20 px-4 py-2 rounded-xl text-xs border shadow-md flex items-center gap-2 ${
+        className={`absolute bottom-4 left-4 z-20 px-4 py-2 rounded-xl text-xs border shadow-md flex flex-wrap items-center gap-2 transition-all duration-300 ${
           isDark
-            ? 'bg-[#1E293B] border-slate-800 text-slate-300'
-            : 'bg-white border-slate-200 text-slate-600'
+            ? 'bg-[#1E293B]/90 border-slate-800 text-slate-300 backdrop-blur-sm'
+            : 'bg-white/95 border-slate-200 text-slate-600'
         }`}
       >
-        <span>🖱️ Kéo sơ đồ để di chuyển • Cuộn chuột để phóng to/thu nhỏ</span>
+        <span>
+          {isFocused
+            ? '🖱️ Kéo để di chuyển • Cuộn chuột để zoom • Nhấn Esc để khóa'
+            : '🔒 Sơ đồ đang khóa • Bấm vào để kích hoạt di chuyển/thu phóng'}
+        </span>
         {selectedStartRoomId && (
-          <span className={`px-2 py-0.5 rounded font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30`}>
+          <span className="px-2 py-0.5 rounded font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30">
             📍 Điểm chọn: {objects.find(o => o.id === selectedStartRoomId)?.name}
           </span>
         )}
@@ -723,6 +991,15 @@ export function FloorPlanViewer({
           <span>ĐƯỜNG THOÁT HIỂM ĐANG HOẠT ĐỘNG</span>
         </div>
       )}
+
+      {/* Floating Danger Sensors Panel (collapsible sidebar) */}
+      <DangerSensorsPanel
+        dangerSensors={dangerSensors}
+        floors={floors}
+        currentFloorId={sensors[0]?.floor_id || null}
+        onSelectSensor={(sensor) => onSelectDangerSensor && onSelectDangerSensor(sensor)}
+        isDark={isDark}
+      />
     </div>
   );
 }

@@ -46,6 +46,45 @@ class FloorPlanSaveRequest(BaseModel):
     canvas_shape: str | None = "rect"
 
 
+class BuildingFloorPlanSaveRequest(FloorPlanSaveRequest):
+    floor_id: int
+
+
+class BuildingPlanSaveRequest(BaseModel):
+    floors: list[BuildingFloorPlanSaveRequest] = Field(min_length=1)
+
+
+class SafePathNodeResponse(BaseModel):
+    floor_id: int
+    floor_name: str
+    node_id: str
+    node_name: str | None = None
+    cost: float
+
+
+class SafePathSegmentResponse(BaseModel):
+    kind: str
+    status: str = "safe"
+    floor_id: int | None = None
+    wire_id: str | None = None
+    from_floor_id: int
+    to_floor_id: int
+    from_node_id: str
+    to_node_id: str
+    reverse: bool = False
+
+
+class SafePathResponse(BaseModel):
+    algorithm: str
+    mode: str
+    nodes: list[SafePathNodeResponse]
+    segments: list[SafePathSegmentResponse]
+    hazard_nodes: list[SafePathNodeResponse] = Field(default_factory=list)
+    destination_nodes: list[SafePathNodeResponse] = Field(default_factory=list)
+    total_hops: int
+    convergence_iterations: int
+
+
 class FloorCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 

@@ -7,6 +7,7 @@ interface StairsShapeProps {
   object: FloorPlanObject;
   selected: boolean;
   isDark: boolean;
+  active?: boolean;
   commonProps: any;
 }
 
@@ -14,11 +15,12 @@ export const StairsShape: React.FC<StairsShapeProps> = React.memo(({
   object,
   selected,
   isDark,
+  active = false,
   commonProps,
 }) => {
   const width = object.width || 80;
   const height = object.height || 80;
-  const stairStrokeColor = selected ? '#3b82f6' : '#475569';
+  const stairStrokeColor = active ? '#10b981' : selected ? '#3b82f6' : '#475569';
   const fill = object.color || '#cbd5e1';
 
   return (
@@ -30,6 +32,9 @@ export const StairsShape: React.FC<StairsShapeProps> = React.memo(({
         stroke={stairStrokeColor}
         strokeWidth={1.5}
         cornerRadius={8}
+        shadowColor={active ? '#10b981' : undefined}
+        shadowBlur={active ? 16 : 0}
+        shadowOpacity={active ? 0.9 : 0}
       />
       <StairsSymbol width={width} height={height} strokeColor={stairStrokeColor} strokeWidth={1.5} isDashed={false} />
       {object.target_floor_id && (

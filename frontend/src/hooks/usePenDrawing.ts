@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { FloorPlanObject } from '../types/editor';
 import { createNewObject } from '../data/initialMockData';
 import { GRID_SIZE } from '../utils/snapHelpers';
+import { getDefaultSize } from '../utils/geometryHelpers';
 
 export type PenDrawingType = 'floor_base' | 'led_wire' | 'wall';
 
@@ -10,6 +11,30 @@ export interface DrawingState {
   startX: number;
   startY: number;
   points: number[]; // coordinates relative to (startX, startY)
+}
+
+const ROUTE_NODE_TYPES = new Set<FloorPlanObject['type']>([
+  'sensor', 'mq2', 'temp', 'room', 'exit', 'stairs', 'led',
+]);
+
+function nearestRouteNode(
+  objects: FloorPlanObject[],
+  x: number,
+  y: number,
+  excludedId?: string,
+) {
+  let nearest: { object: FloorPlanObject; distance: number } | null = null;
+  for (const object of objects) {
+    if (!ROUTE_NODE_TYPES.has(object.type) || object.id === excludedId || object.visible === false) continue;
+    const size = getDefaultSize(object.type);
+    const centerX = object.x + (object.width ?? size.width) / 2;
+    const centerY = object.y + (object.height ?? size.height) / 2;
+    const distance = Math.hypot(x - centerX, y - centerY);
+    if (distance <= 40 && (!nearest || distance < nearest.distance)) {
+      nearest = { object, distance };
+    }
+  }
+  return nearest?.object;
 }
 
 // Helper function to snap coordinates to orthogonal alignment (relative to the last vertex) and grid lines
@@ -71,7 +96,8 @@ export function usePenDrawing(
   onAddObject: (type: any, x: number, y: number) => void,
   onSelect: (id: string, append: boolean) => void,
   onCancel: () => void,
-  snapEnabled = true
+  snapEnabled = true,
+  objects: FloorPlanObject[] = [],
 ) {
   const [drawingState, setDrawingState] = useState<DrawingState | null>(null);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
@@ -130,6 +156,17 @@ export function usePenDrawing(
 
     const newObj = createNewObject(baseType + '-pen', minX, minY);
     newObj.points = relativePoints;
+
+    if (baseType === 'led_wire' && points.length >= 4) {
+      const firstX = drawingState.startX + points[0];
+      const firstY = drawingState.startY + points[1];
+      const lastX = drawingState.startX + points[points.length - 2];
+      const lastY = drawingState.startY + points[points.length - 1];
+      const fromNode = nearestRouteNode(objects, firstX, firstY);
+      const toNode = nearestRouteNode(objects, lastX, lastY, fromNode?.id);
+      newObj.fromNodeId = fromNode?.id;
+      newObj.toNodeId = toNode?.id;
+    }
     
     // Set shapeType to polygon for Konva compatibility
     newObj.shapeType = 'polygon';
@@ -145,7 +182,7 @@ export function usePenDrawing(
     setGuideLines([]);
     onSelect(newObj.id, false);
     onCancel();
-  }, [drawingState, cancelDrawing, onAddCustomObject, onAddObject, onSelect, onCancel]);
+  }, [drawingState, cancelDrawing, onAddCustomObject, onAddObject, onSelect, onCancel, objects]);
 
   const handleCanvasClick = useCallback((pointerX: number, pointerY: number, button = 0) => {
     const isPenTool = activeTool === 'floor_base-pen' || activeTool === 'led_wire-pen' || activeTool === 'wall-pen';

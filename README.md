@@ -101,3 +101,30 @@ Frontend mặc định chạy ở: `http://127.0.0.1:5173`
 - polygon room, connector, arrow, LED routing
 - MQTT bridge cho ESP32 thật
 - PostgreSQL + Alembic + RBAC chi tiết hơn
+
+## Gradient Field routing
+
+Emberpath dùng thuật toán Gradient Field đã tích hợp từ dự án EscapeMesh. Mỗi
+lối thoát quảng bá cost `0`; các node còn lại nhận `min(neighbor_cost) + 1` qua
+từng nhịp cho tới khi hội tụ. Tuyến thoát hiểm luôn đi theo cost giảm dần.
+
+- Chỉ object `led_wire` nối đúng hai node mới tạo cạnh trên đồ thị.
+- `connector` cũ và dây LED hở đầu không được dùng để suy đoán đường đi.
+- Node có trạng thái `danger` được tách khỏi topology an toàn; mọi dây LED sát
+  node cháy chuyển đỏ và có mũi tên hướng ra xa node đó.
+- Cầu thang cùng tên dùng `target_floor_id` để tạo liên kết giữa các tầng.
+- Khi kích hoạt, Gradient Field tạo chỉ dẫn cho toàn bộ các tầng đang liên kết.
+- Mỗi vùng ưu tiên đi tới lối thoát; vùng không có lối thoát sẽ hướng tới node
+  xa đám cháy nhất có thể.
+- Khi kích hoạt, toàn bộ dây LED hợp lệ đều được phân loại: dây chạm node
+  `danger` màu đỏ, tất cả dây còn lại màu xanh; không còn dây màu mặc định.
+- Dây có mũi tên và bám vào node khi node di chuyển.
+- Nút **Lưu sơ đồ** lưu bản nháp của toàn bộ tầng trong một giao dịch cấp tòa nhà.
+
+Tài khoản xem seed demo 4 tầng:
+
+- `gradient@emberpath.demo` / `123456`
+
+API `GET /floors/{floorId}/path?start_node_id=...` trả về node, đoạn dây LED,
+số hop và số vòng hội tụ của Gradient Field. Có thể truyền thêm
+`end_node_id` khi cần tìm tới một node cụ thể trong trình chỉnh sửa.

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import Konva from 'konva';
 import { Circle, Group, Layer, Line, Rect, Stage, Text, Transformer } from 'react-konva';
-import { FloorPlanObject } from '../../types/editor';
+import { FloorPlanObject, SafePathResult } from '../../types/editor';
 import { SensorDevice } from '../../types/sensor';
 import { getDefaultSize, isResizable, isPointInPolygon } from '../../utils/geometryHelpers';
 import { snapPosition, getGuideLines } from '../../utils/snapHelpers';
@@ -45,7 +45,8 @@ interface Props {
   onSelectionBox: (ids: string[]) => void;
   onContextAction: (action: string, objectId: string) => void;
   onViewportChange?: (viewport: { width: number; height: number }) => void;
-  safePath?: string[];
+  floorId?: number | null;
+  safePath?: SafePathResult | null;
 
   // Redesign Props
   editMode: boolean;
@@ -97,7 +98,8 @@ function CanvasEditorComponent(props: Props) {
     props.onAddObject,
     props.onSelect,
     () => props.onContextAction('select', ''),
-    props.snapEnabled
+    props.snapEnabled,
+    props.objects,
   );
 
   const gridPattern = useMemo(() => {
@@ -196,7 +198,6 @@ function CanvasEditorComponent(props: Props) {
   const [editingTextVal, setEditingTextVal] = useState('');
   const [inputPos, setInputPos] = useState({ x: 0, y: 0, width: 100, height: 30, rotation: 0 });
 
-  const safePathLineRef = useRef<Konva.Line | null>(null);
 
   const selectedObjects = useMemo(
     () => props.objects.filter((object) => props.selectedIds.includes(object.id)),
@@ -245,18 +246,25 @@ function CanvasEditorComponent(props: Props) {
     return new Set<string>();
   }, []);
 
-  const safePathPoints = useMemo(() => {
-    if (!props.safePath || props.safePath.length < 2) return null;
-    const points: number[] = [];
-    for (const id of props.safePath) {
-      const node = props.objects.find((o) => o.id === id);
-      if (node) {
-        points.push(node.x + (node.width || getDefaultSize(node.type).width) / 2);
-        points.push(node.y + (node.height || getDefaultSize(node.type).height) / 2);
+  const activeWireDirections = useMemo(() => {
+    const directions = new Map<string, { reverse: boolean; status: 'safe' | 'danger' }>();
+    for (const segment of props.safePath?.segments || []) {
+      if (segment.kind === 'led_wire' && segment.wire_id && segment.floor_id === props.floorId) {
+        directions.set(segment.wire_id, { reverse: segment.reverse, status: segment.status });
       }
     }
-    return points.length >= 4 ? points : null;
-  }, [props.safePath, props.objects]);
+    return directions;
+  }, [props.safePath, props.floorId]);
+
+  const activeStairIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const segment of props.safePath?.segments || []) {
+      if (segment.kind !== 'stairs') continue;
+      if (segment.from_floor_id === props.floorId) ids.add(segment.from_node_id);
+      if (segment.to_floor_id === props.floorId) ids.add(segment.to_node_id);
+    }
+    return ids;
+  }, [props.safePath, props.floorId]);
 
   useEffect(() => {
     const node = wrapperRef.current;
@@ -305,15 +313,15 @@ function CanvasEditorComponent(props: Props) {
       return { pointer: { x: pointerX, y: pointerY }, hoveredId: null };
     }
 
-    const sensors = props.objects.filter(
-      (o) => o.type === 'sensor'
-    );
+    const routeNodeTypes = new Set(['sensor', 'mq2', 'temp', 'room', 'exit', 'stairs', 'led']);
+    const sensors = props.objects.filter((o) => routeNodeTypes.has(o.type) && o.visible !== false);
 
     for (const s of sensors) {
-      const centerX = s.x + 22;
-      const centerY = s.y + 22;
+      const size = getDefaultSize(s.type);
+      const centerX = s.x + (s.width ?? size.width) / 2;
+      const centerY = s.y + (s.height ?? size.height) / 2;
       const dist = Math.hypot(pointerX - centerX, pointerY - centerY);
-      if (dist < 24) {
+      if (dist < 40) {
         return { pointer: { x: centerX, y: centerY }, hoveredId: s.id };
       }
     }
@@ -625,7 +633,8 @@ function CanvasEditorComponent(props: Props) {
     if (object.visible === false || object.id === editingLabelId) return null;
 
     const selected = selectedIdSet.has(object.id);
-    const isSensorDanger = object.type === 'sensor' && dangerDeviceIds.has(object.id);
+    const isSensorDanger = ['sensor', 'mq2', 'temp'].includes(object.type)
+      && (dangerDeviceIds.has(object.id) || object.nodeStatus === 'danger');
     const isSensorWarning = object.type === 'sensor' && warningDeviceIds.has(object.id);
     const sensorReading = sensorValues.get(object.id);
 
@@ -760,6 +769,7 @@ function CanvasEditorComponent(props: Props) {
             object={object}
             selected={selected}
             isDark={isDark}
+            active={activeStairIds.has(object.id)}
             commonProps={commonProps}
           />
         );
@@ -788,13 +798,18 @@ function CanvasEditorComponent(props: Props) {
           />
         );
       case 'led_wire':
+        const wireDirection = activeWireDirections.get(object.id);
         return (
           <LedWireShape
             key={object.id}
             object={object}
             selected={selected}
             isDark={isDark}
-            active={Boolean(props.safePath && props.safePath.length > 0)}
+            active={wireDirection !== undefined}
+            reverse={wireDirection?.reverse ?? false}
+            status={wireDirection?.status}
+            fromNode={object.fromNodeId ? objectById.get(object.fromNodeId) : undefined}
+            toNode={object.toNodeId ? objectById.get(object.toNodeId) : undefined}
             commonProps={commonProps}
           />
         );
@@ -850,11 +865,13 @@ function CanvasEditorComponent(props: Props) {
     props.onContextAction,
     objectById,
     wallObjects,
+    activeWireDirections,
+    activeStairIds,
     props.objects,
     hoveredSensorId,
   ]);
 
-  const hasSafePathAnimation = Boolean(safePathPoints) || Boolean(props.safePath && props.safePath.length > 0);
+  const hasSafePathAnimation = activeWireDirections.size > 0;
   const hasStatusAnimation = dangerRooms.size > 0 || dangerDeviceIds.size > 0 || warningDeviceIds.size > 0;
 
   useEffect(() => {
@@ -871,10 +888,6 @@ function CanvasEditorComponent(props: Props) {
       // 1. Animate evacuation path line dashOffset & LED wires
       const timeDiff = frame.timeDiff;
       dashOffset = (dashOffset - (timeDiff * 0.05)) % 40;
-      if (safePathLineRef.current) {
-        safePathLineRef.current.dashOffset(dashOffset);
-      }
-
       const activeLedWires = stage.find('.active-led-wire');
       activeLedWires.forEach((node) => {
         (node as any).dashOffset(dashOffset);
@@ -1036,23 +1049,6 @@ function CanvasEditorComponent(props: Props) {
                 stageRef={stageRef}
                 onUpdateObject={props.onUpdateObject}
                 onContextAction={props.onContextAction}
-              />
-            )}
-
-            {/* Safe Escape Route Glowing Flow Arrow Line */}
-            {safePathPoints && (
-              <Line
-                ref={safePathLineRef}
-                points={safePathPoints}
-                stroke="#10b981"
-                strokeWidth={7}
-                lineJoin="round"
-                lineCap="round"
-                dash={[20, 15]}
-                shadowColor="#10b981"
-                shadowBlur={12}
-                shadowOpacity={0.8}
-                listening={false}
               />
             )}
 

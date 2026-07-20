@@ -1,4 +1,4 @@
-import { UserCheck, ShieldCheck } from 'lucide-react';
+import { Route, UserCheck, ShieldCheck } from 'lucide-react';
 
 interface DemoAccountsProps {
   onSelect: (email: string, pass: string) => void;
@@ -26,6 +26,15 @@ export function DemoAccounts({ onSelect, isDark, disabled }: DemoAccountsProps) 
       iconColor: 'text-[#3B82F6]',
       bgColor: 'hover:border-[#3B82F6]/50 hover:bg-[#3B82F6]/5',
     },
+    {
+      role: 'Demo Gradient 4 tầng',
+      email: 'gradient@emberpath.demo',
+      pass: '123456',
+      desc: 'Thử tuyến LED đa tầng và nhánh tránh node nguy hiểm.',
+      icon: Route,
+      iconColor: 'text-emerald-500',
+      bgColor: 'hover:border-emerald-500/50 hover:bg-emerald-500/5',
+    },
   ];
 
   return (
@@ -43,7 +52,7 @@ export function DemoAccounts({ onSelect, isDark, disabled }: DemoAccountsProps) 
         </span>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {accounts.map((acc, index) => {
           const Icon = acc.icon;
           return (

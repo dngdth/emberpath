@@ -23,7 +23,7 @@ export function MonitorInfoSection({
   
   // Overall statistics
   const roomCount = useMemo(() => objects.filter((o) => o.type === 'room').length, [objects]);
-  const sensorCount = useMemo(() => objects.filter((o) => o.type === 'mq2' || o.type === 'temp').length, [objects]);
+  const sensorCount = useMemo(() => objects.filter((o) => o.type === 'sensor' || o.type === 'mq2' || o.type === 'temp').length, [objects]);
   const dangerCount = dangerRooms.size;
 
   // Filter list of danger sensors
@@ -100,18 +100,23 @@ export function MonitorInfoSection({
   }
 
   // Sensor node detail view
-  if (selectedObject.type === 'mq2' || selectedObject.type === 'temp') {
+  if (selectedObject.type === 'sensor' || selectedObject.type === 'mq2' || selectedObject.type === 'temp') {
     const live = sensors.find((s) => s.device_id === selectedObject.id);
     const isDanger = live?.latest_status === 'danger';
     const isWarning = live?.latest_status === 'safe' && live.latest_value >= live.threshold * 0.8;
+
+    const isMq2 = selectedObject.type === 'mq2' || selectedObject.id.toLowerCase().includes('mq2');
+    const isTemp = selectedObject.type === 'temp' || selectedObject.id.toLowerCase().includes('temp');
+    const icon = isMq2 ? '💨' : isTemp ? '🌡️' : '📡';
+    const defaultLabel = isMq2 ? 'Cảm biến Khói (MQ2)' : isTemp ? 'Cảm biến Nhiệt độ' : 'Cảm biến';
 
     return (
       <div className="space-y-4">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-xl">{selectedObject.type === 'mq2' ? '💨' : '🌡️'}</span>
+            <span className="text-xl">{icon}</span>
             <div>
-              <h4 className="font-bold text-xs">{selectedObject.name || 'Sensor'}</h4>
+              <h4 className="font-bold text-xs">{selectedObject.name || defaultLabel}</h4>
               <span className="text-[10px] font-mono opacity-50 block">{selectedObject.id}</span>
             </div>
           </div>

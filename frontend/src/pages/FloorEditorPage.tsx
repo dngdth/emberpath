@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
-import { floorsApi } from '../services/backend';
+import { floorsApi, FloorPlanSavePayload } from '../services/backend';
 import { useAuthStore } from '../store/authStore';
 import { useThemeStore } from '../store/themeStore';
 import { CanvasEditor } from '../components/MapEditor/CanvasEditor';
-import { FloorListSection } from '../components/MapEditor/FloorListSection';
-import { MonitorInfoSection } from '../components/MapEditor/MonitorInfoSection';
-import { TokenLibrary } from '../components/MapEditor/TokenLibrary';
-import { PropertyPanel } from '../components/MapEditor/PropertyPanel';
+import { EditorHeader } from '../components/MapEditor/EditorHeader';
+import { LeftSidebar } from '../components/MapEditor/LeftSidebar';
+import { RightSidebar } from '../components/MapEditor/RightSidebar';
 import { ConfirmModal } from '../components/MapEditor/ConfirmModal';
 import { FloorRenameModal } from '../components/MapEditor/FloorRenameModal';
 import { useEditorState } from '../hooks/useEditorState';
@@ -15,24 +14,13 @@ import { useSelection } from '../hooks/useSelection';
 import { useZoomPan } from '../hooks/useZoomPan';
 import { useRealtimeSensors } from '../hooks/useRealtimeSensors';
 import { exportPlanToJson, importPlanFromJson } from '../utils/serialization';
-import { FloorItem, FloorPlanObject, ObjectType } from '../types/editor';
+import { FloorItem, FloorPlanObject, SafePathResult } from '../types/editor';
 import {
-  Layers,
-  ArrowLeft,
-  LogOut,
-  RotateCcw,
   Eye,
   Activity,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Undo2,
-  Redo2,
-  Save,
-  Download,
-  Upload,
 } from 'lucide-react';
-import { SwitchTheme } from '../components/UI/SwitchTheme';
 import clsx from 'clsx';
 
 export function FloorEditorPage() {
@@ -86,7 +74,7 @@ export function FloorEditorPage() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState('');
   const [editorViewport, setEditorViewport] = useState({ width: 1200, height: 780 });
-  const [safePath, setSafePath] = useState<string[]>([]);
+  const [safePath, setSafePath] = useState<SafePathResult | null>(null);
 
   // Modals visibility states
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -99,6 +87,39 @@ export function FloorEditorPage() {
   // Base line from floor below states
   const [belowObjects, setBelowObjects] = useState<FloorPlanObject[]>([]);
   const [showBelowBaseline, setShowBelowBaseline] = useState<boolean>(true);
+
+  // Resizer state for left panel Floor section height
+  const [leftPanelFloorHeight, setLeftPanelFloorHeight] = useState<number>(() => {
+    const saved = localStorage.getItem('leftPanelFloorHeight');
+    return saved ? parseInt(saved, 10) : 200;
+  });
+  const isResizingRef = useRef<boolean>(false);
+
+  const handleResizerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isResizingRef.current = true;
+    const startY = e.clientY;
+    const startHeight = leftPanelFloorHeight;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!isResizingRef.current) return;
+      const deltaY = moveEvent.clientY - startY;
+      const newHeight = Math.max(100, Math.min(500, startHeight + deltaY));
+      setLeftPanelFloorHeight(newHeight);
+      localStorage.setItem('leftPanelFloorHeight', String(newHeight));
+    };
+
+    const handleMouseUp = () => {
+      isResizingRef.current = false;
+      document.body.classList.remove('select-none');
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.body.classList.add('select-none');
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  }, [leftPanelFloorHeight]);
 
   const [canvasWidth, setCanvasWidth] = useState<number>(1600);
   const [canvasHeight, setCanvasHeight] = useState<number>(1000);
@@ -126,13 +147,27 @@ export function FloorEditorPage() {
 
   // Keep a stable ref to history.state to prevent stale state issues in deferred saves
   const objectsRef = useRef<FloorPlanObject[]>(history.state);
+  const floorDraftsRef = useRef<Map<number, FloorPlanSavePayload>>(new Map());
+  const loadedFloorIdRef = useRef<number | null>(null);
   useEffect(() => {
     objectsRef.current = history.state;
   }, [history.state]);
 
-  // Save current floor plan with a deferred callback to prevent text area blur race condition
+  // Preserve every opened floor while the user moves around the building.
+  useEffect(() => {
+    const floorId = loadedFloorIdRef.current;
+    if (!floorId || floorId !== activeFloorId) return;
+    floorDraftsRef.current.set(floorId, {
+      objects: history.state,
+      canvas_width: canvasWidth,
+      canvas_height: canvasHeight,
+      canvas_shape: canvasShape,
+    });
+  }, [activeFloorId, history.state, canvasWidth, canvasHeight, canvasShape]);
+
+  // Save the complete building with a deferred callback to prevent text-area blur races.
   const savePlan = useCallback(async () => {
-    if (!activeFloorId) return;
+    if (!activeFloorId || floors.length === 0) return;
     setSaving(true);
 
     // Force blur on the active element (e.g. inline textarea) to trigger state updates
@@ -143,21 +178,49 @@ export function FloorEditorPage() {
     // Delay slightly to let React finish batching the state updates
     setTimeout(async () => {
       try {
-        await floorsApi.savePlan(activeFloorId, {
+        floorDraftsRef.current.set(activeFloorId, {
           objects: objectsRef.current,
           canvas_width: canvasWidthRef.current,
           canvas_height: canvasHeightRef.current,
           canvas_shape: canvasShapeRef.current,
         });
-        setToast('Đã lưu sơ đồ thành công');
+
+        const missingFloors = floors.filter((floor) => !floorDraftsRef.current.has(floor.id));
+        const remotePlans = await Promise.all(
+          missingFloors.map((floor) => floorsApi.getPlan(floor.id)),
+        );
+        for (const plan of remotePlans) {
+          floorDraftsRef.current.set(plan.floor_id, {
+            objects: plan.objects,
+            canvas_width: plan.canvas_width ?? 1600,
+            canvas_height: plan.canvas_height ?? 1000,
+            canvas_shape: plan.canvas_shape ?? 'rect',
+          });
+        }
+
+        const savedPlans = await floorsApi.saveBuildingPlans(
+          floors.map((floor) => ({
+            floor_id: floor.id,
+            ...floorDraftsRef.current.get(floor.id)!,
+          })),
+        );
+        for (const plan of savedPlans) {
+          floorDraftsRef.current.set(plan.floor_id, {
+            objects: plan.objects,
+            canvas_width: plan.canvas_width ?? 1600,
+            canvas_height: plan.canvas_height ?? 1000,
+            canvas_shape: plan.canvas_shape ?? 'rect',
+          });
+        }
+        setToast(`Đã lưu toàn bộ tòa nhà (${savedPlans.length} tầng)`);
       } catch (err) {
         console.error('Failed to save plan:', err);
-        alert('Không thể lưu sơ đồ mặt bằng.');
+        alert('Không thể lưu toàn bộ sơ đồ tòa nhà. Không có tầng nào được lưu một phần.');
       } finally {
         setSaving(false);
       }
     }, 100);
-  }, [activeFloorId]);
+  }, [activeFloorId, floors]);
 
   // Load live sensor data for monitoring
   const { summary, mq2, temperature, loading: sensorsLoading, wsStatus } = useRealtimeSensors(
@@ -194,6 +257,11 @@ export function FloorEditorPage() {
   // Fetch plan of floor below when active floor changes
   useEffect(() => {
     if (floorBelow) {
+      const cached = floorDraftsRef.current.get(floorBelow.id);
+      if (cached) {
+        setBelowObjects(cached.objects);
+        return;
+      }
       floorsApi.getPlan(floorBelow.id)
         .then((plan) => {
           setBelowObjects(plan.objects);
@@ -310,7 +378,7 @@ export function FloorEditorPage() {
     const dangerPositions: { x: number; y: number }[] = [];
 
     history.state.forEach((obj) => {
-      if (obj.type === 'mq2' || obj.type === 'temp') {
+      if (obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp') {
         if (dangerDeviceIds.has(obj.id)) {
           dangerPositions.push({ x: obj.x, y: obj.y });
         }
@@ -336,34 +404,37 @@ export function FloorEditorPage() {
     return rooms;
   }, [history.state, dangerDeviceIds]);
 
+  const findSafePath = useCallback(async (startId: string, endId: string) => {
+    if (!activeFloorId) return;
+    try {
+      const path = await floorsApi.findPath(activeFloorId, startId, endId);
+      setSafePath(path);
+      selection.clearSelection();
+    } catch (error: any) {
+      alert(error.response?.data?.detail || 'Không thể tìm thấy đường đi an toàn.');
+    }
+  }, [activeFloorId, selection]);
+
   useEffect(() => {
     if (editMode) return; // Automatic pathfinding disabled in Edit Mode
 
-    const exitNode = history.state.find((o) => o.type === 'exit');
-    if (!exitNode) {
-      setSafePath([]);
-      return;
-    }
-
-    const dangerRoom = history.state.find((o) => o.type === 'room' && dangerRooms.has(o.id));
-    if (dangerRoom && activeFloorId) {
-      floorsApi.findPath(activeFloorId, dangerRoom.id, exitNode.id)
+    const dangerNode = history.state.find((object) =>
+      (['sensor', 'mq2', 'temp'].includes(object.type)
+        && (dangerDeviceIds.has(object.id) || object.nodeStatus === 'danger'))
+      || (object.type === 'room' && dangerRooms.has(object.id))
+    );
+    if (dangerNode && activeFloorId) {
+      floorsApi.findPath(activeFloorId, dangerNode.id)
         .then((path) => {
           setSafePath(path);
         })
         .catch(() => {
-          // Fallback route
-          const lobby = history.state.find((o) => o.type === 'room' && o.id.toLowerCase().includes('lobby'));
-          if (lobby) {
-            setSafePath([dangerRoom.id, lobby.id, exitNode.id]);
-          } else {
-            setSafePath([dangerRoom.id, exitNode.id]);
-          }
+          setSafePath(null);
         });
     } else {
-      setSafePath([]);
+      setSafePath(null);
     }
-  }, [activeFloorId, editMode, dangerRooms, history.state]);
+  }, [activeFloorId, editMode, dangerDeviceIds, dangerRooms, history.state]);
 
   // Load floors list
   async function loadFloors() {
@@ -381,11 +452,22 @@ export function FloorEditorPage() {
   async function loadPlan(floorId: number) {
     setLoading(true);
     try {
-      const data = await floorsApi.getPlan(floorId);
-      setCanvasWidth(data.canvas_width ?? 1600);
-      setCanvasHeight(data.canvas_height ?? 1000);
-      setCanvasShape(data.canvas_shape ?? 'rect');
-      history.reset(data.objects);
+      let draft = floorDraftsRef.current.get(floorId);
+      if (!draft) {
+        const data = await floorsApi.getPlan(floorId);
+        draft = {
+          objects: data.objects,
+          canvas_width: data.canvas_width ?? 1600,
+          canvas_height: data.canvas_height ?? 1000,
+          canvas_shape: data.canvas_shape ?? 'rect',
+        };
+        floorDraftsRef.current.set(floorId, draft);
+      }
+      loadedFloorIdRef.current = floorId;
+      setCanvasWidth(draft.canvas_width);
+      setCanvasHeight(draft.canvas_height);
+      setCanvasShape(draft.canvas_shape);
+      history.reset(draft.objects);
       selection.clearSelection();
       setTimeout(() => {
         zoomPan.resetView(editorViewport);
@@ -396,22 +478,21 @@ export function FloorEditorPage() {
     }
   }
 
-
-
-  function handleToolPick(type: string) {
+  const handleToolPick = useCallback((type: string) => {
     editor.setActiveTool(type);
-  }
+  }, [editor]);
 
   // Modal CRUD triggers
-  function triggerDeleteFloor(floor: FloorItem) {
+  const triggerDeleteFloor = useCallback((floor: FloorItem) => {
     setFloorToDelete(floor);
     setDeleteModalOpen(true);
-  }
+  }, []);
 
-  async function confirmDeleteFloor() {
+  const confirmDeleteFloor = useCallback(async () => {
     if (!floorToDelete) return;
     try {
       await floorsApi.remove(floorToDelete.id);
+      floorDraftsRef.current.delete(floorToDelete.id);
       setFloors((current) => current.filter((f) => f.id !== floorToDelete.id));
       if (activeFloorId === floorToDelete.id) {
         const remaining = floors.filter((f) => f.id !== floorToDelete.id);
@@ -424,19 +505,19 @@ export function FloorEditorPage() {
       setDeleteModalOpen(false);
       setFloorToDelete(null);
     }
-  }
+  }, [floorToDelete, activeFloorId, floors]);
 
-  function triggerRenameFloor(floor: FloorItem) {
+  const triggerRenameFloor = useCallback((floor: FloorItem) => {
     setFloorToRename(floor);
     setRenameModalOpen(true);
-  }
+  }, []);
 
-  function triggerAddFloor() {
+  const triggerAddFloor = useCallback(() => {
     setFloorToRename(null);
     setRenameModalOpen(true);
-  }
+  }, []);
 
-  async function handleSaveFloorName(name: string) {
+  const handleSaveFloorName = useCallback(async (name: string) => {
     if (floorToRename) {
       try {
         const data = await floorsApi.rename(floorToRename.id, name);
@@ -457,9 +538,9 @@ export function FloorEditorPage() {
     }
     setRenameModalOpen(false);
     setFloorToRename(null);
-  }
+  }, [floorToRename]);
 
-  function handleContextAction(action: string, objectId: string) {
+  const handleContextAction = useCallback((action: string, objectId: string) => {
     if (action === 'select') {
       editor.setActiveTool('select');
       return;
@@ -473,6 +554,17 @@ export function FloorEditorPage() {
 
     if (action === 'find_path' && selection.selectedIds.length === 2) {
       void findSafePath(selection.selectedIds[0], selection.selectedIds[1]);
+      return;
+    }
+
+    if (action === 'delete_multiple') {
+      try {
+        const ids = JSON.parse(objectId) as string[];
+        editor.removeObjects(ids);
+      } catch (err) {
+        editor.removeObjects([objectId]);
+      }
+      selection.clearSelection();
       return;
     }
 
@@ -497,20 +589,9 @@ export function FloorEditorPage() {
     if (action === 'front') editor.bringToFront(objectId);
     if (action === 'back') editor.sendToBack(objectId);
     if (action === 'lock') editor.updateObject(objectId, { locked: !object.locked });
-  }
+  }, [editor, selection, history.state, findSafePath]);
 
-  async function findSafePath(startId: string, endId: string) {
-    if (!activeFloorId) return;
-    try {
-      const path = await floorsApi.findPath(activeFloorId, startId, endId);
-      setSafePath(path);
-      selection.clearSelection();
-    } catch (error: any) {
-      alert(error.response?.data?.detail || 'Không thể tìm thấy đường đi an toàn.');
-    }
-  }
-
-  function handleExport() {
+  const handleExport = useCallback(() => {
     const blob = new Blob([exportPlanToJson(history.state)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
@@ -521,9 +602,9 @@ export function FloorEditorPage() {
 
     URL.revokeObjectURL(url);
     setFileMenuOpen(false);
-  }
+  }, [activeFloorId, history.state]);
 
-  async function handleImport() {
+  const handleImport = useCallback(async () => {
     const raw = window.prompt('Paste floor-plan JSON');
     if (!raw) return;
 
@@ -543,9 +624,9 @@ export function FloorEditorPage() {
     } finally {
       setFileMenuOpen(false);
     }
-  }
+  }, [history, selection, editorViewport, zoomPan]);
 
-  function updateSelectedObject(patch: Partial<FloorPlanObject>) {
+  const updateSelectedObject = useCallback((patch: Partial<FloorPlanObject>) => {
     if (!selectedObject) return;
 
     // Intercept ID change to keep selection active
@@ -555,7 +636,83 @@ export function FloorEditorPage() {
     } else {
       editor.updateObject(selectedObject.id, patch);
     }
-  }
+  }, [selectedObject, editor, selection]);
+
+  const handleUpdateCanvasSize = useCallback((w: number, h: number) => {
+    setCanvasWidth(w);
+    setCanvasHeight(h);
+  }, []);
+
+  const handleCommitCanvasResize = useCallback((w: number, h: number, shiftX: number, shiftY: number) => {
+    setCanvasWidth(w);
+    setCanvasHeight(h);
+    if (shiftX !== 0 || shiftY !== 0) {
+      const updatedObjects = history.state.map((obj) => {
+        if (obj.type === 'connector') return obj;
+        return {
+          ...obj,
+          x: obj.x + shiftX,
+          y: obj.y + shiftY,
+        };
+      });
+      history.set(updatedObjects);
+    }
+  }, [history]);
+
+  const handleStageChange = useCallback((patch: { scale?: number; position?: { x: number; y: number } }) => {
+    if (patch.scale !== undefined) zoomPan.setScale(patch.scale);
+    if (patch.position) zoomPan.setPosition(patch.position);
+  }, [zoomPan]);
+
+  const handleSelect = useCallback((id: string, append: boolean) => {
+    if (append) {
+      selection.toggleSelection(id);
+    } else {
+      selection.selectOne(id);
+    }
+  }, [selection]);
+
+  const handleSelectionBox = useCallback((ids: string[]) => {
+    selection.setSelectedIds(ids);
+  }, [selection]);
+
+  const handleAddCustomObject = useCallback((obj: FloorPlanObject) => {
+    history.set([...history.state, obj]);
+  }, [history]);
+
+  const toggleSnap = useCallback(() => {
+    editor.setSnapEnabled(!editor.snapEnabled);
+  }, [editor]);
+
+  const handleCanvasSizeChange = useCallback((w: number, h: number) => {
+    setCanvasWidth(w);
+    setCanvasHeight(h);
+  }, []);
+
+  const handleZoomIn = useCallback(() => {
+    zoomPan.zoomIn(editorViewport);
+  }, [zoomPan, editorViewport]);
+
+  const handleZoomOut = useCallback(() => {
+    zoomPan.zoomOut(editorViewport);
+  }, [zoomPan, editorViewport]);
+
+  const handleZoomFit = useCallback(() => {
+    zoomPan.fitView(editorViewport);
+  }, [zoomPan, editorViewport]);
+
+  const handleZoomReset = useCallback(() => {
+    zoomPan.resetView(editorViewport);
+  }, [zoomPan, editorViewport]);
+
+  const handleSetEditMode = useCallback((val: boolean) => {
+    setEditMode(val);
+    selection.clearSelection();
+  }, [selection]);
+
+  const handleClearSelection = useCallback(() => {
+    selection.clearSelection();
+  }, [selection]);
 
   return (
     <div
@@ -565,181 +722,27 @@ export function FloorEditorPage() {
       )}
       style={{ fontFamily: "'Inter', sans-serif" }}
     >
-
       {/* 1. COMPACT INTEGRATED HEADER (FIGMA STYLE) */}
-      <header
-        className={clsx(
-          'flex items-center justify-between px-4 py-3 border-b shrink-0 h-14 transition-colors duration-300 z-30 select-none',
-          isDark ? 'border-slate-850 bg-[#1E293B]' : 'border-slate-200 bg-white'
-        )}
-      >
-        {/* Left Section: Back link, building name */}
-        <div className="flex items-center gap-3">
-          <a
-            href="/dashboard"
-            className={clsx(
-              'p-2 rounded-xl border transition hover:scale-105 active:scale-95',
-              isDark
-                ? 'border-slate-800 bg-slate-900 text-slate-450 hover:bg-slate-850 hover:text-white'
-                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-55'
-            )}
-            title="Về Dashboard"
-          >
-            <ArrowLeft size={15} />
-          </a>
-
-          <div>
-            <h1 className="hidden sm:block text-xs font-black tracking-tight leading-tight uppercase opacity-90">
-              {user?.building.name}
-            </h1>
-          </div>
-        </div>
-
-        {/* Center Section: Compact tools switchers, standalone save, action dropdowns */}
-        <div className="flex items-center gap-3">
-          {editMode ? (
-            <>
-              {/* History Undo / Redo */}
-              <div className={clsx('hidden md:flex items-center border rounded-xl overflow-hidden', isDark ? 'border-slate-855 bg-slate-900/60' : 'border-slate-200 bg-white')}>
-                <button
-                  onClick={history.undo}
-                  disabled={!history.canUndo}
-                  className="p-2 hover:bg-black/10 transition disabled:opacity-30 disabled:cursor-not-allowed text-inherit"
-                  title="Undo (Ctrl+Z)"
-                >
-                  <Undo2 size={13} />
-                </button>
-                <span className={`h-4 w-px ${isDark ? 'bg-slate-805' : 'bg-slate-200'}`} />
-                <button
-                  onClick={history.redo}
-                  disabled={!history.canRedo}
-                  className="p-2 hover:bg-black/10 transition disabled:opacity-30 disabled:cursor-not-allowed text-inherit"
-                  title="Redo (Ctrl+Y)"
-                >
-                  <Redo2 size={13} />
-                </button>
-              </div>
-
-              {/* Standalone Save button */}
-              <button
-                onClick={() => void savePlan()}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition shadow-sm active:scale-95 shrink-0 h-8"
-                title="Lưu sơ đồ thiết kế vào hệ thống (Ctrl+S)"
-              >
-                <Save size={13} />
-                <span className="hidden sm:inline">Lưu sơ đồ</span>
-              </button>
-
-              {/* Export/Import JSON Dropdown */}
-              <div className="relative font-sans hidden md:block" ref={fileMenuRef}>
-                <button
-                  onClick={() => setFileMenuOpen(!fileMenuOpen)}
-                  className={clsx(
-                    'flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition shadow-sm select-none h-8',
-                    isDark
-                      ? 'border-slate-800 bg-slate-900 text-slate-100 hover:bg-slate-855'
-                      : 'border-slate-200 bg-white text-slate-850 hover:bg-slate-55'
-                  )}
-                >
-                  <span>Xuất/Nhập</span>
-                  <ChevronDown size={12} className="opacity-60" />
-                </button>
-
-                {fileMenuOpen && (
-                  <div
-                    className={clsx(
-                      'absolute right-0 mt-1.5 w-44 rounded-2xl border p-1.5 shadow-2xl z-40 transition-colors duration-200',
-                      isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
-                    )}
-                  >
-                    <button
-                      onClick={handleExport}
-                      className={clsx(
-                        'flex items-center gap-2.5 w-full rounded-xl px-3 py-2 text-left text-xs font-bold transition',
-                        isDark ? 'text-slate-350 hover:bg-slate-800 hover:text-white' : 'text-slate-700 hover:bg-slate-55'
-                      )}
-                    >
-                      <Download size={13} />
-                      <span>Xuất File JSON</span>
-                    </button>
-                    <button
-                      onClick={() => void handleImport()}
-                      className={clsx(
-                        'flex items-center gap-2.5 w-full rounded-xl px-3 py-2 text-left text-xs font-bold transition',
-                        isDark ? 'text-slate-350 hover:bg-slate-800 hover:text-white' : 'text-slate-700 hover:bg-slate-55'
-                      )}
-                    >
-                      <Upload size={13} />
-                      <span>Nạp File JSON</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            // Monitor status text
-            <span className="text-xs font-bold text-emerald-500 uppercase flex items-center gap-1.5 select-none animate-pulse">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              <span>Chế độ giám sát live</span>
-            </span>
-          )}
-        </div>
-
-        {/* Right Section: Mode switch, Theme switch, Profile */}
-        <div className="flex items-center gap-2 md:gap-3.5">
-          {/* Mode Switch Toggle */}
-          <div className="flex items-center gap-1 rounded-xl p-1 bg-slate-950/20 border border-slate-800/10 dark:border-slate-800">
-            {user?.role === 'admin_building' ? (
-              <>
-                <button
-                  onClick={() => {
-                    setEditMode(true);
-                    selection.clearSelection();
-                  }}
-                  className={clsx(
-                    'flex items-center gap-1 px-2.5 py-1 rounded-lg text-[9px] font-extrabold transition-all',
-                    editMode ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'
-                  )}
-                >
-                  <span>EDIT</span>
-                </button>
-                <button
-                  onClick={() => {
-                    setEditMode(false);
-                    selection.clearSelection();
-                  }}
-                  className={clsx(
-                    'flex items-center gap-1 px-2.5 py-1 rounded-lg text-[9px] font-extrabold transition-all',
-                    !editMode ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'
-                  )}
-                >
-                  <span>MONITOR</span>
-                </button>
-              </>
-            ) : (
-              <div className="flex items-center gap-1 px-2.5 py-1 text-[9px] font-extrabold text-slate-400">
-                <Eye size={10} className="text-emerald-500" />
-                <span>GIÁM SÁT</span>
-              </div>
-            )}
-          </div>
-
-          <SwitchTheme />
-
-          <button
-            onClick={logout}
-            className={clsx(
-              'p-2 rounded-xl border transition',
-              isDark
-                ? 'border-slate-850 hover:bg-rose-955/20 hover:text-rose-450 hover:border-rose-900 text-slate-400'
-                : 'border-slate-200 bg-white hover:bg-slate-55 text-slate-700'
-            )}
-            title="Đăng xuất"
-          >
-            <LogOut size={14} />
-          </button>
-        </div>
-      </header>
+      <EditorHeader
+        user={user}
+        logout={logout}
+        editMode={editMode}
+        setEditMode={handleSetEditMode}
+        isDark={isDark}
+        canUndo={history.canUndo}
+        canRedo={history.canRedo}
+        undo={history.undo}
+        redo={history.redo}
+        savePlan={savePlan}
+        fileMenuOpen={fileMenuOpen}
+        setFileMenuOpen={setFileMenuOpen}
+        handleExport={handleExport}
+        handleImport={handleImport}
+        fileMenuRef={fileMenuRef}
+        clearSelection={handleClearSelection}
+        activeTool={editor.activeTool}
+        setActiveTool={editor.setActiveTool}
+      />
 
       {/* 2. FULL CANVAS WORKSPACE WITH FLOATING SIDEBARS (FIGMA LAYOUT) */}
       <div className="flex-1 w-full relative overflow-hidden bg-slate-950">
@@ -756,25 +759,9 @@ export function FloorEditorPage() {
               <CanvasEditor
                 canvasWidth={canvasWidth}
                 canvasHeight={canvasHeight}
-                onUpdateCanvasSize={(w, h) => {
-                  setCanvasWidth(w);
-                  setCanvasHeight(h);
-                }}
-                onCommitCanvasResize={(w, h, shiftX, shiftY) => {
-                  setCanvasWidth(w);
-                  setCanvasHeight(h);
-                  if (shiftX !== 0 || shiftY !== 0) {
-                    const updatedObjects = history.state.map((obj) => {
-                      if (obj.type === 'connector') return obj;
-                      return {
-                        ...obj,
-                        x: obj.x + shiftX,
-                        y: obj.y + shiftY,
-                      };
-                    });
-                    history.set(updatedObjects);
-                  }
-                }}
+                floorId={activeFloorId}
+                onUpdateCanvasSize={handleUpdateCanvasSize}
+                onCommitCanvasResize={handleCommitCanvasResize}
                 safePath={safePath}
                 objects={history.state}
                 selectedIds={selection.selectedIds}
@@ -783,17 +770,12 @@ export function FloorEditorPage() {
                 position={zoomPan.position}
                 snapEnabled={editor.snapEnabled}
                 onViewportChange={setEditorViewport}
-                onStageChange={(patch) => {
-                  if (patch.scale !== undefined) zoomPan.setScale(patch.scale);
-                  if (patch.position) zoomPan.setPosition(patch.position);
-                }}
+                onStageChange={handleStageChange}
                 onAddObject={editor.addObject}
-                onAddCustomObject={(obj) => {
-                  history.set([...history.state, obj]);
-                }}
-                onSelect={(id, append) => (append ? selection.toggleSelection(id) : selection.selectOne(id))}
-                onClearSelection={selection.clearSelection}
-                onSelectionBox={selection.setSelectedIds}
+                onAddCustomObject={handleAddCustomObject}
+                onSelect={handleSelect}
+                onClearSelection={handleClearSelection}
+                onSelectionBox={handleSelectionBox}
                 onUpdateObject={editor.updateObject}
                 onContextAction={handleContextAction}
 
@@ -804,10 +786,10 @@ export function FloorEditorPage() {
                 sensors={allSensors}
 
                 // Zoom Callbacks
-                onZoomIn={() => zoomPan.zoomIn(editorViewport)}
-                onZoomOut={() => zoomPan.zoomOut(editorViewport)}
-                onFit={() => zoomPan.fitView(editorViewport)}
-                onReset={() => zoomPan.resetView(editorViewport)}
+                onZoomIn={handleZoomIn}
+                onZoomOut={handleZoomOut}
+                onFit={handleZoomFit}
+                onReset={handleZoomReset}
               />
               {history.state.length === 0 && editMode && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-450 bg-transparent p-6 pointer-events-none select-none z-10">
@@ -855,130 +837,47 @@ export function FloorEditorPage() {
         </div>
 
         {/* FLOATING SIDEBAR LEFT: FLOORS LIST & TOKEN LIBRARY (FIGMA LAYERS STYLING) */}
-        <aside
-          className={clsx(
-            'absolute left-4 top-4 bottom-4 w-72 max-w-[calc(100vw-32px)] z-20 overflow-hidden backdrop-blur-md rounded-2xl border transition-all duration-300 flex flex-col',
-            isDark ? 'border-slate-700/70 bg-slate-900/98 shadow-[0_4px_30px_rgba(0,0,0,0.6)]' : 'border-slate-200/80 bg-white/90 shadow-2xl',
-            showLeftPanel ? 'translate-x-0 opacity-100' : '-translate-x-96 opacity-0 pointer-events-none'
-          )}
-        >
-          {/* Panel Header */}
-          <div className="p-4 border-b border-slate-800/10 dark:border-slate-800/50 shrink-0 flex items-center justify-between">
-            <span className="text-[10px] font-extrabold uppercase tracking-widest opacity-75">Layers / Tầng</span>
-            <button
-              onClick={() => setShowLeftPanel(false)}
-              className="text-[10px] font-bold text-slate-400 hover:text-slate-100"
-            >
-              Ẩn
-            </button>
-          </div>
-
-          {/* Section 1: Floors list scroll container */}
-          <div className="p-4 border-b border-slate-800/10 dark:border-slate-800/50 max-h-[300px] overflow-y-auto scrollbar-thin">
-            <FloorListSection
-              floors={floors}
-              activeFloorId={activeFloorId}
-              loading={loading}
-              userRole={user?.role}
-              isDark={isDark}
-              onFloorSelect={setActiveFloorId}
-              onAddFloor={triggerAddFloor}
-              onRenameFloor={triggerRenameFloor}
-              onDeleteFloor={triggerDeleteFloor}
-            />
-          </div>
-
-          {/* Section 2: Token Library (Edit mode only) */}
-          {editMode && (
-            <div className="p-4 flex-1 flex flex-col min-h-0 overflow-hidden">
-              <div className="mb-2.5 flex items-center justify-between shrink-0 select-none">
-                <span className="text-[10px] font-extrabold uppercase tracking-widest opacity-75">Assets / Thư viện</span>
-                <button
-                  onClick={() => editor.setSnapEnabled(!editor.snapEnabled)}
-                  className={`rounded-lg border px-2 py-0.5 text-[9px] font-extrabold transition ${editor.snapEnabled
-                    ? 'border-blue-500/30 bg-blue-500/10 text-blue-400'
-                    : isDark
-                      ? 'border-slate-800 bg-slate-950 text-slate-400'
-                      : 'border-slate-200 bg-slate-50 text-slate-500'
-                    }`}
-                >
-                  Lưới: {editor.snapEnabled ? 'Bật' : 'Tắt'}
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto pr-1 scrollbar-thin">
-                <TokenLibrary activeTool={editor.activeTool} onSelect={handleToolPick} />
-              </div>
-            </div>
-          )}
-
-          {/* Under baseline toggle if exists */}
-          {floorBelow && (
-            <div className="p-3 border-t border-slate-800/10 dark:border-slate-800/50 bg-slate-950/20 shrink-0">
-              <button
-                onClick={() => setShowBelowBaseline(!showBelowBaseline)}
-                className={clsx(
-                  'w-full rounded-xl border px-3 py-2 text-left font-bold text-[10px] uppercase transition flex items-center justify-between',
-                  showBelowBaseline
-                    ? 'border-indigo-500/20 bg-indigo-500/10 text-indigo-400'
-                    : isDark
-                      ? 'border-slate-800 bg-slate-950 text-slate-400'
-                      : 'border-slate-200 bg-slate-50 text-slate-500'
-                )}
-                title={`Nét đứt mờ tầng dưới (${floorBelow.name})`}
-              >
-                <span>Nét đứt tầng dưới</span>
-                <span>{showBelowBaseline ? 'ON' : 'OFF'}</span>
-              </button>
-            </div>
-          )}
-        </aside>
+        <LeftSidebar
+          showLeftPanel={showLeftPanel}
+          setShowLeftPanel={setShowLeftPanel}
+          isDark={isDark}
+          editMode={editMode}
+          floors={floors}
+          activeFloorId={activeFloorId}
+          loading={loading}
+          userRole={user?.role}
+          setActiveFloorId={setActiveFloorId}
+          onAddFloor={triggerAddFloor}
+          onRenameFloor={triggerRenameFloor}
+          onDeleteFloor={triggerDeleteFloor}
+          leftPanelFloorHeight={leftPanelFloorHeight}
+          onResizerMouseDown={handleResizerMouseDown}
+          activeTool={editor.activeTool}
+          onToolPick={handleToolPick}
+          snapEnabled={editor.snapEnabled}
+          onToggleSnap={toggleSnap}
+          floorBelow={floorBelow}
+          showBelowBaseline={showBelowBaseline}
+          setShowBelowBaseline={setShowBelowBaseline}
+        />
 
         {/* FLOATING SIDEBAR RIGHT: PROPERTIES / INSPECTOR (FIGMA INSPECTOR STYLING) */}
-        <aside
-          className={clsx(
-            'absolute right-4 top-4 bottom-4 w-80 max-w-[calc(100vw-32px)] z-20 overflow-hidden backdrop-blur-md rounded-2xl border transition-all duration-300 flex flex-col',
-            isDark ? 'border-slate-700/70 bg-slate-900/98 shadow-[0_4px_30px_rgba(0,0,0,0.6)]' : 'border-slate-200/80 bg-white/90 shadow-2xl',
-            showRightPanel ? 'translate-x-0 opacity-100' : 'translate-x-96 opacity-0 pointer-events-none'
-          )}
-        >
-          {/* Panel Header */}
-          <div className="p-4 border-b border-slate-800/10 dark:border-slate-800/50 shrink-0 flex items-center justify-between">
-            <h3 className="text-xs font-black uppercase tracking-wider opacity-75">
-              {editMode ? 'Properties' : 'Monitor Inspect'}
-            </h3>
-            <button
-              onClick={() => setShowRightPanel(false)}
-              className="text-[10px] font-bold text-slate-400 hover:text-slate-100"
-            >
-              Ẩn
-            </button>
-          </div>
-          {/* Properties body scroll container */}
-          <div className="p-4 overflow-y-auto flex-1 scrollbar-thin">
-            {editMode ? (
-              <PropertyPanel
-                object={selectedObject}
-                onChange={updateSelectedObject}
-                canvasWidth={canvasWidth}
-                canvasHeight={canvasHeight}
-                onCanvasSizeChange={(w, h) => {
-                  setCanvasWidth(w);
-                  setCanvasHeight(h);
-                }}
-                floors={floors}
-              />
-            ) : (
-              <MonitorInfoSection
-                selectedObject={selectedObject}
-                objects={history.state}
-                sensors={allSensors}
-                dangerRooms={dangerRooms}
-                activeFloorName={activeFloor?.name}
-                isDark={isDark}
-              />
-            )}
-          </div>
-        </aside>
+        <RightSidebar
+          showRightPanel={showRightPanel}
+          setShowRightPanel={setShowRightPanel}
+          isDark={isDark}
+          editMode={editMode}
+          selectedObject={selectedObject}
+          updateSelectedObject={updateSelectedObject}
+          canvasWidth={canvasWidth}
+          canvasHeight={canvasHeight}
+          onCanvasSizeChange={handleCanvasSizeChange}
+          floors={floors}
+          objects={history.state}
+          allSensors={allSensors}
+          dangerRooms={dangerRooms}
+          activeFloorName={activeFloor?.name}
+        />
       </div>
 
       {/* Confirms & Modals */}
@@ -1017,4 +916,5 @@ export function FloorEditorPage() {
     </div>
   );
 }
+
 export default FloorEditorPage;

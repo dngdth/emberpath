@@ -26,14 +26,164 @@ def make_obj(object_id: str, type_: str, x: float, y: float, **kwargs):
         "textColor": kwargs.get("textColor"),
         "fontSize": kwargs.get("fontSize"),
         "nodeStatus": kwargs.get("nodeStatus"),
+        "fromNodeId": kwargs.get("fromNodeId"),
+        "toNodeId": kwargs.get("toNodeId"),
+        "target_floor_id": kwargs.get("target_floor_id"),
+        "shapeType": kwargs.get("shapeType"),
+        "points": kwargs.get("points"),
         "locked": kwargs.get("locked", False),
         "visible": kwargs.get("visible", True),
     }
     return {k: v for k, v in payload.items() if v is not None}
 
 
+def make_wire(object_id: str, left: dict, right: dict, *via: tuple[float, float]):
+    def center(obj: dict) -> tuple[float, float]:
+        return (
+            float(obj["x"]) + float(obj.get("width", 48)) / 2,
+            float(obj["y"]) + float(obj.get("height", 48)) / 2,
+        )
+
+    absolute_points = [center(left), *via, center(right)]
+    origin_x = min(point[0] for point in absolute_points)
+    origin_y = min(point[1] for point in absolute_points)
+    points = [coordinate for point in absolute_points for coordinate in (point[0] - origin_x, point[1] - origin_y)]
+    return make_obj(
+        object_id,
+        "led_wire",
+        origin_x,
+        origin_y,
+        name="Dây LED",
+        color="#64748b",
+        fromNodeId=left["id"],
+        toNodeId=right["id"],
+        shapeType="polygon",
+        points=points,
+    )
+
+
+def _add_plan(db: Session, building_id: int, floor: Floor, objects: list[dict]) -> None:
+    plan = FloorPlan(
+        building_id=building_id,
+        floor_id=floor.id,
+        canvas_json=json.dumps(objects),
+        canvas_width=1100,
+        canvas_height=650,
+        version=1,
+    )
+    db.add(plan)
+    db.flush()
+    db.add_all([
+        PlanObject(
+            plan_id=plan.id,
+            building_id=building_id,
+            floor_id=floor.id,
+            object_id=obj["id"],
+            type=obj["type"],
+            name=obj.get("name"),
+            x=obj["x"],
+            y=obj["y"],
+            width=obj.get("width"),
+            height=obj.get("height"),
+            rotation=obj.get("rotation", 0),
+            color=obj.get("color"),
+            text_color=obj.get("textColor"),
+            font_size=obj.get("fontSize"),
+            node_status=obj.get("nodeStatus"),
+            locked=obj.get("locked", False),
+            visible=obj.get("visible", True),
+            shape_type=obj.get("shapeType"),
+            target_floor_id=obj.get("target_floor_id"),
+        )
+        for obj in objects
+    ])
+
+
+def _seed_gradient_demo(db: Session) -> None:
+    if db.scalar(select(Building).where(Building.code == "GRADIENT-DEMO")):
+        return
+
+    building = Building(name="Gradient Demo Tower", code="GRADIENT-DEMO")
+    db.add(building)
+    db.flush()
+    db.add(
+        User(
+            name="Gradient Demo Admin",
+            email="gradient@emberpath.demo",
+            password_hash=get_password_hash("123456"),
+            role=UserRole.ADMIN_BUILDING.value,
+            building_id=building.id,
+        )
+    )
+
+    floors = [
+        Floor(building_id=building.id, name=f"Tầng {index}", order_index=index)
+        for index in range(1, 5)
+    ]
+    db.add_all(floors)
+    db.flush()
+
+    def base_objects(index: int) -> list[dict]:
+        return [
+            make_obj("floor-base", "floor_base", 35, 45, width=1030, height=550, name=f"Mặt bằng tầng {index}", color="#172033", locked=True),
+            make_obj("floor-label", "label", 65, 68, width=360, height=40, name=f"GRADIENT FIELD • TẦNG {index}", fontSize=24, color="#e2e8f0"),
+            make_obj("wall-top", "wall", 55, 125, width=990, height=8, name="Tường", color="#475569"),
+            make_obj("wall-bottom", "wall", 55, 545, width=990, height=8, name="Tường", color="#475569"),
+        ]
+
+    # Tầng 1 contains the exits. The red branch is deliberately blocked so
+    # the gradient chooses the safe upper branch.
+    f1_entry = make_obj("f1-entry", "sensor", 120, 310, width=54, height=54, name="Node sảnh tầng 1")
+    f1_junction = make_obj("f1-junction", "sensor", 350, 310, width=54, height=54, name="Node phân nhánh")
+    f1_safe = make_obj("f1-safe", "sensor", 590, 175, width=54, height=54, name="Nhánh an toàn")
+    f1_danger = make_obj("f1-danger", "sensor", 590, 430, width=54, height=54, name="Nhánh có cháy", nodeStatus="danger")
+    f1_stairs = make_obj("f1-stairs-a", "stairs", 850, 310, width=92, height=76, name="Cầu thang A")
+    f1_exit = make_obj("f1-exit", "exit", 900, 155, width=105, height=48, name="LỐI THOÁT")
+    floor1_objects = [
+        *base_objects(1), f1_entry, f1_junction, f1_safe, f1_danger, f1_stairs, f1_exit,
+        make_wire("f1-wire-entry-junction", f1_entry, f1_junction),
+        make_wire("f1-wire-stairs-junction", f1_stairs, f1_junction),
+        make_wire("f1-wire-junction-safe", f1_junction, f1_safe),
+        make_wire("f1-wire-safe-exit", f1_safe, f1_exit),
+        make_wire("f1-wire-junction-danger", f1_junction, f1_danger),
+        make_wire("f1-wire-danger-exit", f1_danger, f1_exit),
+    ]
+
+    all_objects = [floor1_objects]
+    for index in range(2, 5):
+        previous_floor = floors[index - 2]
+        start = make_obj(f"f{index}-start", "sensor", 115, 300, width=54, height=54, name=f"Node xuất phát T{index}", nodeStatus="safe")
+        upper = make_obj(f"f{index}-upper", "sensor", 390, 175, width=54, height=54, name="Node hành lang Bắc")
+        lower = make_obj(f"f{index}-lower", "sensor", 390, 420, width=54, height=54, name="Node hành lang Nam")
+        merge = make_obj(f"f{index}-merge", "sensor", 650, 300, width=54, height=54, name="Node hợp tuyến")
+        stairs = make_obj(
+            f"f{index}-stairs-a",
+            "stairs",
+            850,
+            300,
+            width=92,
+            height=76,
+            name="Cầu thang A",
+            target_floor_id=previous_floor.id,
+        )
+        objects = [
+            *base_objects(index), start, upper, lower, merge, stairs,
+            make_wire(f"f{index}-wire-start-upper", start, upper),
+            make_wire(f"f{index}-wire-start-lower", start, lower),
+            make_wire(f"f{index}-wire-upper-merge", upper, merge),
+            make_wire(f"f{index}-wire-lower-merge", lower, merge),
+            make_wire(f"f{index}-wire-merge-stairs", merge, stairs),
+        ]
+        all_objects.append(objects)
+
+    for floor, objects in zip(floors, all_objects):
+        _add_plan(db, building.id, floor, objects)
+    db.commit()
+
+
 def seed_database(db: Session) -> None:
     if db.scalar(select(Building).limit(1)):
+        _seed_gradient_demo(db)
         return
 
     building_a = Building(name="Building A", code="B01")
@@ -148,3 +298,4 @@ def seed_database(db: Session) -> None:
         db.add(SensorReading(device_id=device.id, value=latest_value, status=status, unit=unit, created_at=now))
 
     db.commit()
+    _seed_gradient_demo(db)

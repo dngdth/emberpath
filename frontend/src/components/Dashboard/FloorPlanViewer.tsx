@@ -1,25 +1,45 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import Konva from 'konva';
 import { Circle, Group, Layer, Line, Rect, Stage, Text } from 'react-konva';
-import { ZoomIn, ZoomOut, Maximize, RefreshCw, AlertTriangle, ShieldCheck } from 'lucide-react';
-import { FloorPlanObject } from '../../types/editor';
+import { ZoomIn, ZoomOut, Maximize, RefreshCw, AlertTriangle, ShieldCheck, Lock, Unlock, MousePointer } from 'lucide-react';
+import { FloorPlanObject, FloorItem, SafePathResult } from '../../types/editor';
 import { SensorDevice } from '../../types/sensor';
 import { getDefaultSize, isPointInPolygon } from '../../utils/geometryHelpers';
 import { StairsSymbol } from '../MapEditor/StairsSymbol';
+import { DangerSensorsPanel } from './DangerSensorsPanel';
+
+// Reuse shape components from editor
+import { FloorBaseShape } from '../MapEditor/Shapes/FloorBaseShape';
+import { RoomShape } from '../MapEditor/Shapes/RoomShape';
+import { DoorShape } from '../MapEditor/Shapes/DoorShape';
+import { ExitShape } from '../MapEditor/Shapes/ExitShape';
+import { StairsShape } from '../MapEditor/Shapes/StairsShape';
+import { ElevatorShape } from '../MapEditor/Shapes/ElevatorShape';
+import { WallShape } from '../MapEditor/Shapes/WallShape';
+import { SensorShape } from '../MapEditor/Shapes/SensorShape';
+import { LedWireShape } from '../MapEditor/Shapes/LedWireShape';
+import { LedShape } from '../MapEditor/Shapes/LedShape';
+import { ConnectorShape } from '../MapEditor/Shapes/ConnectorShape';
+import { LabelShape } from '../MapEditor/Shapes/LabelShape';
 
 interface Props {
+  floorId: number | null;
   objects: FloorPlanObject[];
   sensors: SensorDevice[];
-  safePath: string[];
+  safePath: SafePathResult | null;
   onRoomSelect?: (roomId: string) => void;
   selectedStartRoomId?: string | null;
   evacuationActive: boolean;
   isDark: boolean;
   canvasWidth?: number;
   canvasHeight?: number;
+  dangerSensors: SensorDevice[];
+  floors: FloorItem[];
+  onSelectDangerSensor?: (sensor: SensorDevice) => void;
 }
 
 export function FloorPlanViewer({
+  floorId,
   objects,
   sensors,
   safePath,
@@ -29,6 +49,9 @@ export function FloorPlanViewer({
   isDark,
   canvasWidth,
   canvasHeight,
+  dangerSensors,
+  floors,
+  onSelectDangerSensor,
 }: Props) {
   const w = canvasWidth ?? 1600;
   const h = canvasHeight ?? 1000;
@@ -42,8 +65,64 @@ export function FloorPlanViewer({
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [panOrigin, setPanOrigin] = useState({ x: 0, y: 0 });
+  const [isFocused, setIsFocused] = useState(false);
+  const [hoveredSensorId, setHoveredSensorId] = useState<string | null>(null);
 
-  const safePathLineRef = useRef<Konva.Line | null>(null);
+  const longPressTimerRef = useRef<any>(null);
+
+  const handleTouchStart = (objId: string) => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+    }
+    longPressTimerRef.current = setTimeout(() => {
+      setHoveredSensorId(objId);
+    }, 500);
+  };
+
+  const handleTouchEnd = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    setHoveredSensorId(null);
+  };
+
+  const handleTouchMove = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const hoveredSensorObj = useMemo(() => {
+    if (!hoveredSensorId) return null;
+    return objects.find((o) => o.id === hoveredSensorId) || null;
+  }, [hoveredSensorId, objects]);
+
+  const hoveredSensorData = useMemo(() => {
+    if (!hoveredSensorId) return null;
+    const found = sensors.find((s) => s.device_id === hoveredSensorId);
+    if (found) return found;
+
+    // Fallback info for mock/unlinked sensors
+    if (hoveredSensorObj) {
+      const isMq2 = hoveredSensorObj.type === 'mq2' || hoveredSensorObj.id.toLowerCase().includes('mq2');
+      const isTemp = hoveredSensorObj.type === 'temp' || hoveredSensorObj.id.toLowerCase().includes('temp');
+      return {
+        device_id: hoveredSensorObj.id,
+        name: hoveredSensorObj.name || (isMq2 ? 'CB Khói MQ2' : isTemp ? 'CB Nhiệt độ' : 'Cảm biến'),
+        sensor_type: isMq2 ? 'mq2' : 'temp',
+        latest_value: 0,
+        threshold: isMq2 ? 100 : 60,
+        latest_status: 'safe',
+        unit: isMq2 ? 'ppm' : '°C',
+        room_name: null,
+      } as any;
+    }
+    return null;
+  }, [hoveredSensorId, sensors, hoveredSensorObj]);
+
+  const hasDraggedRef = useRef(false);
 
   const gridPattern = useMemo(() => {
     if (typeof window === 'undefined') return null;
@@ -149,11 +228,54 @@ export function FloorPlanViewer({
     });
   };
 
+  // Click outside to defocus
   useEffect(() => {
-    if (objects.length > 0 && viewport.width > 800) {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setIsFocused(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
+  }, []);
+
+  // Escape key to lock map
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFocused) {
+        setIsFocused(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isFocused]);
+
+  // Center/Zoom or Reset View reactively
+  useEffect(() => {
+    if (objects.length === 0) return;
+    if (selectedStartRoomId) {
+      const obj = objects.find((o) => o.id === selectedStartRoomId);
+      if (obj) {
+        const objW = obj.width || 40;
+        const objH = obj.height || 40;
+        const targetX = obj.x + objW / 2;
+        const targetY = obj.y + objH / 2;
+        const targetScale = 1.2;
+        setScale(targetScale);
+        setPosition({
+          x: Math.round(viewport.width / 2 - targetX * targetScale),
+          y: Math.round(viewport.height / 2 - targetY * targetScale),
+        });
+        setIsFocused(true);
+      }
+    } else {
       handleResetView();
     }
-  }, [objects.length, viewport.width]);
+  }, [objects, selectedStartRoomId, viewport.width, viewport.height]);
 
   // Zoom controls
   const handleZoom = (factor: number) => {
@@ -174,17 +296,20 @@ export function FloorPlanViewer({
 
   // Mouse drag panning
   const handleMouseDown = (e: any) => {
-    if (e.target === e.target.getStage() || e.target.hasName('workspace-empty')) {
-      setIsPanning(true);
-      setPanStart({ x: e.evt.clientX, y: e.evt.clientY });
-      setPanOrigin({ x: position.x, y: position.y });
-    }
+    if (!isFocused) return;
+    setIsPanning(true);
+    hasDraggedRef.current = false;
+    setPanStart({ x: e.evt.clientX, y: e.evt.clientY });
+    setPanOrigin({ x: position.x, y: position.y });
   };
 
   const handleMouseMove = (e: any) => {
-    if (!isPanning) return;
+    if (!isFocused || !isPanning) return;
     const dx = e.evt.clientX - panStart.x;
     const dy = e.evt.clientY - panStart.y;
+    if (Math.hypot(dx, dy) > 3) {
+      hasDraggedRef.current = true;
+    }
     setPosition({
       x: panOrigin.x + dx,
       y: panOrigin.y + dy,
@@ -196,6 +321,7 @@ export function FloorPlanViewer({
   };
 
   const handleWheel = (e: any) => {
+    if (!isFocused) return;
     e.evt.preventDefault();
     const stage = stageRef.current;
     if (!stage) return;
@@ -250,7 +376,7 @@ export function FloorPlanViewer({
     const dangerPositions: { x: number; y: number }[] = [];
     
     objects.forEach((obj) => {
-      if (obj.type === 'mq2' || obj.type === 'temp') {
+      if (obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp') {
         if (dangerDeviceIds.has(obj.id)) {
           dangerPositions.push({ x: obj.x, y: obj.y });
         }
@@ -290,410 +416,246 @@ export function FloorPlanViewer({
     return rooms;
   }, [objects, dangerDeviceIds]);
 
-  // 3. Process safe path coordinates
-  const safePathPoints = useMemo(() => {
-    if (!evacuationActive || !safePath || safePath.length < 2) return null;
-    const points: number[] = [];
-    safePath.forEach((id) => {
-      const node = objects.find((o) => o.id === id);
-      if (node) {
-        const size = getDefaultSize(node.type);
-        points.push(node.x + (node.width || size.width) / 2);
-        points.push(node.y + (node.height || size.height) / 2);
+  const activeWireDirections = useMemo(() => {
+    const directions = new Map<string, { reverse: boolean; status: 'safe' | 'danger' }>();
+    if (!evacuationActive) return directions;
+    for (const segment of safePath?.segments || []) {
+      if (segment.kind === 'led_wire' && segment.wire_id && segment.floor_id === floorId) {
+        directions.set(segment.wire_id, { reverse: segment.reverse, status: segment.status });
       }
-    });
-    return points.length >= 4 ? points : null;
-  }, [evacuationActive, safePath, objects]);
-
-  // Room rendering style mapper
-  const getRoomStyle = (room: FloorPlanObject) => {
-    const isDanger = dangerRooms.has(room.id);
-    const isSelected = selectedStartRoomId === room.id;
-    
-    if (isDanger) {
-      return {
-        fill: 'rgba(239, 68, 68, 0.45)',
-        stroke: '#ef4444',
-        strokeWidth: 3.5,
-        shadowColor: '#ef4444',
-        shadowBlur: 15,
-      };
     }
+    return directions;
+  }, [evacuationActive, floorId, safePath]);
 
-    if (isSelected) {
-      return {
-        fill: isDark ? 'rgba(59, 130, 246, 0.3)' : 'rgba(59, 130, 246, 0.15)',
-        stroke: '#3b82f6',
-        strokeWidth: 3,
-        shadowColor: '#3b82f6',
-        shadowBlur: 10,
-      };
+  const activeStairIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!evacuationActive) return ids;
+    for (const segment of safePath?.segments || []) {
+      if (segment.kind !== 'stairs') continue;
+      if (segment.from_floor_id === floorId) ids.add(segment.from_node_id);
+      if (segment.to_floor_id === floorId) ids.add(segment.to_node_id);
     }
+    return ids;
+  }, [evacuationActive, floorId, safePath]);
 
-    const isLobby = room.name?.toLowerCase().includes('lobby');
-    if (isLobby) {
-      return {
-        fill: isDark ? '#1F2937' : '#f1f5f9',
-        stroke: isDark ? '#374151' : '#cbd5e1',
-        strokeWidth: 1.5,
-        shadowBlur: 0,
-        shadowColor: '',
-      };
-    }
+  const objectById = useMemo(
+    () => new Map(objects.map((object) => [object.id, object])),
+    [objects],
+  );
 
-    return {
-      fill: isDark ? 'rgba(16, 185, 129, 0.12)' : 'rgba(16, 185, 129, 0.05)',
-      stroke: isDark ? '#10B981' : '#10b981',
-      strokeWidth: 1.5,
-      shadowBlur: 0,
-      shadowColor: '',
-    };
-  };
 
-  // Layering order: floor_base first, then others, then connectors
+
+  // Layering helper: sorted by visual hierarchy (floor_base at bottom, led_wire behind sensors, connector at top)
   const sortedObjects = useMemo(() => {
-    const bases = objects.filter((o) => o.type === 'floor_base');
-    const connectors = objects.filter((o) => o.type === 'connector');
-    const others = objects.filter((o) => o.type !== 'floor_base' && o.type !== 'connector');
-    return [...bases, ...others, ...connectors];
+    const order = [
+      'floor_base',
+      'led_wire',
+      'wall',
+      'stairs',
+      'elevator',
+      'exit',
+      'sensor',
+      'label',
+      'connector'
+    ];
+    return [...objects].sort((a, b) => {
+      const idxA = order.indexOf(a.type);
+      const idxB = order.indexOf(b.type);
+      const valA = idxA !== -1 ? idxA : 99;
+      const valB = idxB !== -1 ? idxB : 99;
+      return valA - valB;
+    });
   }, [objects]);
 
   // Render objects on Konva layer
   const renderObject = (obj: FloorPlanObject) => {
     if (obj.visible === false) return null;
-    const oW = obj.width || getDefaultSize(obj.type).width;
-    const oH = obj.height || getDefaultSize(obj.type).height;
+
+    const isSensorType = obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp';
 
     const commonProps = {
-      key: obj.id,
       x: obj.x,
       y: obj.y,
       rotation: obj.rotation || 0,
       onClick: () => {
-        if (obj.type === 'room' && onRoomSelect) {
+        if (hasDraggedRef.current) return;
+        if (['room', 'sensor', 'mq2', 'temp'].includes(obj.type) && onRoomSelect) {
           onRoomSelect(obj.id);
         }
       },
       onTap: () => {
-        if (obj.type === 'room' && onRoomSelect) {
+        if (hasDraggedRef.current) return;
+        if (['room', 'sensor', 'mq2', 'temp'].includes(obj.type) && onRoomSelect) {
           onRoomSelect(obj.id);
         }
       },
+      onMouseEnter: isSensorType
+        ? () => setHoveredSensorId(obj.id)
+        : undefined,
+      onMouseLeave: isSensorType
+        ? () => setHoveredSensorId(null)
+        : undefined,
+      onTouchStart: isSensorType
+        ? () => handleTouchStart(obj.id)
+        : undefined,
+      onTouchEnd: isSensorType
+        ? () => handleTouchEnd()
+        : undefined,
+      onTouchMove: isSensorType
+        ? () => handleTouchMove()
+        : undefined,
     };
 
     if (obj.type === 'floor_base') {
-      const isPolygon = obj.shapeType === 'polygon';
-      const pts = isPolygon ? obj.points || [] : [0, 0, oW, 0, oW, oH, 0, oH];
       return (
-        <Group {...commonProps}>
-          <Group
-            clipFunc={(ctx) => {
-              if (pts.length < 4) return;
-              ctx.beginPath();
-              ctx.moveTo(pts[0], pts[1]);
-              for (let i = 2; i < pts.length; i += 2) {
-                ctx.lineTo(pts[i], pts[i + 1]);
-              }
-              ctx.closePath();
-            }}
-          >
-            <Rect
-              x={0}
-              y={0}
-              width={isPolygon ? 4000 : oW}
-              height={isPolygon ? 4000 : oH}
-              fill={isDark ? 'rgba(30, 41, 59, 0.6)' : 'rgba(203, 213, 225, 0.5)'}
-            />
-          </Group>
-          <Line
-            points={pts}
-            closed={true}
-            stroke={isDark ? '#334155' : '#cbd5e1'}
-            strokeWidth={2}
-            listening={false}
-          />
-        </Group>
+        <FloorBaseShape
+          object={obj}
+          selected={false}
+          isDark={isDark}
+          commonProps={commonProps}
+        />
       );
     }
 
     if (obj.type === 'room') {
-      const style = getRoomStyle(obj);
       const isDanger = dangerRooms.has(obj.id);
-      const isPolygon = obj.shapeType === 'polygon';
-      const pts = obj.points || [];
-
       return (
-        <Group {...commonProps}>
-          {isPolygon && pts.length >= 6 ? (
-            <Line
-              name={isDanger ? "danger-blink" : undefined}
-              points={pts}
-              closed={true}
-              fill={style.fill}
-              stroke={style.stroke}
-              strokeWidth={style.strokeWidth}
-              shadowColor={style.shadowColor}
-              shadowBlur={style.shadowBlur}
-              shadowOpacity={0.6}
-            />
-          ) : (
-            <Rect
-              name={isDanger ? "danger-blink" : undefined}
-              width={oW}
-              height={oH}
-              fill={style.fill}
-              stroke={style.stroke}
-              strokeWidth={style.strokeWidth}
-              cornerRadius={16}
-              shadowColor={style.shadowColor}
-              shadowBlur={style.shadowBlur}
-              shadowOpacity={0.6}
-            />
-          )}
-          {/* Room Name */}
-          <Text
-            text={obj.name || 'Room'}
-            x={isPolygon ? pts[0] + 16 : 16}
-            y={isPolygon ? pts[1] + 16 : 14}
-            fontSize={15}
-            fontStyle="bold"
-            fill={isDanger ? '#ef4444' : isDark ? '#f8fafc' : '#334155'}
-          />
-
-          {/* Pulsing Danger Badge */}
-          {isDanger && (
-            <Group x={isPolygon ? pts[0] + 16 : 16} y={isPolygon ? pts[1] + 38 : 36}>
-              <Rect
-                width={80}
-                height={20}
-                fill="#ef4444"
-                cornerRadius={6}
-              />
-              <Text
-                text="⚠️ DANGER"
-                x={8}
-                y={5}
-                fontSize={10}
-                fontStyle="bold"
-                fill="#ffffff"
-              />
-            </Group>
-          )}
-        </Group>
+        <RoomShape
+          object={obj}
+          selected={selectedStartRoomId === obj.id}
+          isDark={isDark}
+          isRoomDanger={isDanger}
+          commonProps={commonProps}
+        />
       );
     }
 
     if (obj.type === 'door') {
       return (
-        <Group {...commonProps}>
-          <Rect
-            width={oW}
-            height={oH}
-            fill={isDark ? '#4b5563' : '#d9a36b'}
-            cornerRadius={4}
-          />
-        </Group>
+        <DoorShape
+          object={obj}
+          selected={false}
+          isDark={isDark}
+          commonProps={commonProps}
+        />
       );
     }
 
     if (obj.type === 'exit') {
       return (
-        <Group {...commonProps}>
-          <Rect
-            width={oW}
-            height={oH}
-            fill="#10b981"
-            stroke="#10b981"
-            strokeWidth={1.5}
-            cornerRadius={8}
-          />
-          <Text
-            text={obj.name || 'EXIT'}
-            width={oW}
-            align="center"
-            y={oH / 2 - 7}
-            fontStyle="bold"
-            fontSize={13}
-            fill="#ffffff"
-          />
-        </Group>
+        <ExitShape
+          object={obj}
+          selected={false}
+          commonProps={commonProps}
+        />
       );
     }
 
     if (obj.type === 'stairs') {
-      const stairStrokeColor = '#475569';
       return (
-        <Group {...commonProps}>
-          <Rect
-            width={oW}
-            height={oH}
-            stroke={stairStrokeColor}
-            strokeWidth={1.5}
-            cornerRadius={8}
-            fill={obj.color || '#cbd5e1'}
-          />
-          <StairsSymbol width={oW} height={oH} strokeColor={stairStrokeColor} strokeWidth={1.5} isDashed={false} />
-        </Group>
+        <StairsShape
+          object={obj}
+          selected={false}
+          isDark={isDark}
+          active={activeStairIds.has(obj.id)}
+          commonProps={commonProps}
+        />
       );
     }
 
     if (obj.type === 'elevator') {
       return (
-        <Group {...commonProps}>
-          <Rect
-            width={oW}
-            height={oH}
-            fill="#e2e8f0"
-            stroke="#cbd5e1"
-            strokeWidth={1.5}
-            cornerRadius={8}
-          />
-          <Line
-            points={[oW / 2, 4, oW / 2, oH - 4]}
-            stroke="#94a3b8"
-            strokeWidth={1.5}
-          />
-          <Text
-            text="🛗 Lift"
-            width={oW}
-            align="center"
-            y={oH / 2 - 7}
-            fontSize={11}
-            fontStyle="bold"
-            fill="#475569"
-          />
-        </Group>
+        <ElevatorShape
+          object={obj}
+          selected={false}
+          isDark={isDark}
+          commonProps={commonProps}
+        />
       );
     }
 
     if (obj.type === 'wall') {
       return (
-        <Group {...commonProps}>
-          <Rect
-            width={oW}
-            height={oH}
-            fill="#64748b"
-            stroke="#cbd5e1"
-            strokeWidth={1}
-            cornerRadius={2}
-          />
-        </Group>
+        <WallShape
+          object={obj}
+          selected={false}
+          isDark={isDark}
+          commonProps={commonProps}
+        />
       );
     }
 
-    if (obj.type === 'mq2' || obj.type === 'temp') {
-      const isDanger = dangerDeviceIds.has(obj.id);
+    if (obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp') {
+      const isDanger = dangerDeviceIds.has(obj.id) || obj.nodeStatus === 'danger';
       const isWarning = warningDeviceIds.has(obj.id);
-      
-      let badgeColor = '#f1f5f9';
-      let strokeColor = '#cbd5e1';
-      let textColor = '#475569';
-
-      if (isDanger) {
-        badgeColor = '#ef4444';
-        strokeColor = '#fca5a5';
-        textColor = '#ffffff';
-      } else if (isWarning) {
-        badgeColor = '#f59e0b';
-        strokeColor = '#fde68a';
-        textColor = '#ffffff';
-      }
-
       const reading = sensorValues.get(obj.id);
-      const label = `${obj.name || (obj.type === 'mq2' ? 'MQ2' : 'Temp')}`;
-      const valueStr = reading ? `${reading.val} ${reading.unit}` : '--';
 
       return (
-        <Group {...commonProps}>
-          <Circle
-            name={isDanger ? "danger-blink-sensor" : isWarning ? "warning-blink-sensor" : undefined}
-            radius={22}
-            x={22}
-            y={22}
-            fill={badgeColor}
-            stroke={strokeColor}
-            strokeWidth={2}
-            shadowColor={isDanger ? '#ef4444' : ''}
-            shadowBlur={isDanger ? 10 : 0}
-          />
-          <Text
-            text={obj.type === 'mq2' ? '💨' : '🌡️'}
-            x={13}
-            y={13}
-            fontSize={16}
-          />
-          <Text
-            text={label}
-            x={-15}
-            y={48}
-            width={74}
-            align="center"
-            fontSize={11}
-            fontStyle="bold"
-            fill={isDark ? '#cbd5e1' : '#475569'}
-          />
-          <Group x={-10} y={64}>
-            <Rect
-              width={64}
-              height={16}
-              fill={isDark ? '#0f172a' : '#f8fafc'}
-              stroke={isDanger ? '#ef4444' : isDark ? '#334155' : '#e2e8f0'}
-              strokeWidth={1}
-              cornerRadius={4}
-            />
-            <Text
-              text={valueStr}
-              width={64}
-              align="center"
-              y={3}
-              fontSize={9}
-              fontStyle="bold"
-              fill={isDanger ? '#ef4444' : isDark ? '#38bdf8' : '#3b82f6'}
-            />
-          </Group>
-        </Group>
+        <SensorShape
+          object={obj}
+          selected={false}
+          isDark={isDark}
+          isDanger={isDanger}
+          isWarning={isWarning}
+          reading={reading}
+          isHovered={hoveredSensorId === obj.id}
+          commonProps={commonProps}
+        />
+      );
+    }
+
+    if (obj.type === 'led_wire') {
+      const wireDirection = activeWireDirections.get(obj.id);
+      return (
+        <LedWireShape
+          object={obj}
+          selected={false}
+          isDark={isDark}
+          active={wireDirection !== undefined}
+          reverse={wireDirection?.reverse ?? false}
+          status={wireDirection?.status}
+          fromNode={obj.fromNodeId ? objectById.get(obj.fromNodeId) : undefined}
+          toNode={obj.toNodeId ? objectById.get(obj.toNodeId) : undefined}
+          commonProps={commonProps}
+        />
       );
     }
 
     if (obj.type === 'led') {
-      const isDanger = obj.nodeStatus === 'danger';
       return (
-        <Group {...commonProps}>
-          <Circle
-            radius={10}
-            fill={isDanger ? '#ef4444' : '#10b981'}
-            stroke="#ffffff"
-            strokeWidth={1.5}
-            shadowColor={isDanger ? '#ef4444' : '#10b981'}
-            shadowBlur={isDanger ? 8 : 4}
-          />
-        </Group>
+        <LedShape
+          object={obj}
+          selected={false}
+          commonProps={commonProps}
+        />
       );
     }
 
     if (obj.type === 'connector') {
       const fromNode = objects.find((o) => o.id === obj.fromNodeId);
       const toNode = objects.find((o) => o.id === obj.toNodeId);
-      if (!fromNode || !toNode) return null;
-
-      const fromSize = getDefaultSize(fromNode.type);
-      const toSize = getDefaultSize(toNode.type);
-
-      const fromX = fromNode.x + (fromNode.width || fromSize.width) / 2;
-      const fromY = fromNode.y + (fromNode.height || fromSize.height) / 2;
-      const toX = toNode.x + (toNode.width || toSize.width) / 2;
-      const toY = toNode.y + (toNode.height || toSize.height) / 2;
+      const wallObjects = objects.filter((o) => o.type === 'wall');
 
       return (
-        <Group {...commonProps} x={0} y={0}>
-          <Line
-            points={[fromX, fromY, toX, toY]}
-            stroke={isDark ? '#475569' : '#cbd5e1'}
-            strokeWidth={1.5}
-            dash={[5, 8]}
-            opacity={0.6}
-          />
-        </Group>
+        <ConnectorShape
+          object={obj}
+          selected={false}
+          isDark={isDark}
+          fromNode={fromNode}
+          toNode={toNode}
+          wallObjects={wallObjects}
+          commonProps={commonProps}
+        />
+      );
+    }
+
+    if (obj.type === 'label') {
+      return (
+        <LabelShape
+          object={obj}
+          isDark={isDark}
+          commonProps={commonProps}
+        />
       );
     }
 
@@ -725,11 +687,14 @@ export function FloorPlanViewer({
       if (!frame) return;
       const time = frame.time;
 
-      // 1. Animate evacuation path line dashOffset
-      if (safePathLineRef.current && evacuationActive) {
+      // 1. Animate evacuation path line dashOffset & LED wires
+      if (evacuationActive) {
         const timeDiff = frame.timeDiff;
         dashOffset = (dashOffset - (timeDiff * 0.05)) % 40;
-        safePathLineRef.current.dashOffset(dashOffset);
+        const activeLedWires = stage.find('.active-led-wire');
+        activeLedWires.forEach((node) => {
+          (node as any).dashOffset(dashOffset);
+        });
       }
 
       // 2. Animate blinking danger rooms & warning sensors (500ms intervals)
@@ -755,19 +720,29 @@ export function FloorPlanViewer({
     return () => {
       anim.stop();
     };
-  }, [objects, dangerRooms, safePathPoints, evacuationActive]);
+  }, [objects, dangerRooms, activeWireDirections, evacuationActive, activeStairIds]);
 
   return (
     <div
       ref={wrapperRef}
-      className={`relative w-full h-[520px] overflow-hidden rounded-[24px] border shadow-soft transition-all duration-300 ${
+      onClick={() => {
+        if (!isFocused) setIsFocused(true);
+      }}
+      className={`relative w-full h-[520px] overflow-hidden rounded-xl border shadow-soft transition-all duration-300 ${
         isDark
           ? 'bg-[#0F172A] border-slate-800'
           : 'bg-slate-50 border-slate-200'
+      } ${
+        isFocused
+          ? isDark
+            ? 'ring-[3px] ring-blue-500/40 border-blue-500 shadow-[0_0_25px_rgba(59,130,246,0.25)]'
+            : 'ring-[3px] ring-blue-600/40 border-blue-600 shadow-[0_0_25px_rgba(37,99,235,0.25)]'
+          : ''
       }`}
       style={{ cursor: isPanning ? 'grabbing' : 'default' }}
       onMouseLeave={handleMouseUp}
     >
+
       <Stage
         ref={stageRef}
         width={viewport.width}
@@ -817,29 +792,144 @@ export function FloorPlanViewer({
             scaleY={scale}
           >
             {/* Render all structural objects (Layered bases first) */}
-            {sortedObjects.map(renderObject)}
+            {sortedObjects.map((object) => (
+              <Fragment key={object.id}>{renderObject(object)}</Fragment>
+            ))}
 
-            {/* Evacuation Flow Route (High Fidelity Green Glowing Arrow Path) */}
-            {safePathPoints && (
-              <Line
-                ref={safePathLineRef}
-                points={safePathPoints}
-                stroke="#10b981"
-                strokeWidth={7}
-                lineJoin="round"
-                lineCap="round"
-                dash={[20, 15]}
-                shadowColor="#10b981"
-                shadowBlur={16}
-                shadowOpacity={0.9}
-              />
-            )}
+            {/* Hover Tooltip for Sensors */}
+            {hoveredSensorObj && hoveredSensorData && (() => {
+              const isLinked = sensors.some((s) => s.device_id === hoveredSensorId);
+              const isMq2 = hoveredSensorData.sensor_type === 'mq2';
+              
+              const tooltipWidth = 190;
+              const tooltipHeight = 96;
+              
+              const strokeColor = !isLinked
+                ? (isDark ? '#475569' : '#cbd5e1')
+                : hoveredSensorData.latest_status === 'danger'
+                ? '#ef4444'
+                : hoveredSensorData.latest_value >= hoveredSensorData.threshold * 0.8
+                ? '#f59e0b'
+                : isDark
+                ? '#334155'
+                : '#cbd5e1';
+
+              const statusText = !isLinked
+                ? 'CHƯA LIÊN KẾT 📡'
+                : hoveredSensorData.latest_status === 'danger'
+                ? 'NGUY HIỂM 🚨'
+                : hoveredSensorData.latest_value >= hoveredSensorData.threshold * 0.8
+                ? 'CẢNH BÁO ⚠️'
+                : 'AN TOÀN ✅';
+
+              const statusColor = !isLinked
+                ? (isDark ? '#94a3b8' : '#64748b')
+                : hoveredSensorData.latest_status === 'danger'
+                ? '#ef4444'
+                : hoveredSensorData.latest_value >= hoveredSensorData.threshold * 0.8
+                ? '#d97706'
+                : '#10b981';
+
+              const valueText = isLinked
+                ? `Chỉ số: ${hoveredSensorData.latest_value} ${hoveredSensorData.unit} / ${hoveredSensorData.threshold} ${hoveredSensorData.unit}`
+                : `Chỉ số: -- / Ngưỡng: ${hoveredSensorData.threshold} ${hoveredSensorData.unit}`;
+
+              const valueColor = !isLinked
+                ? (isDark ? '#94a3b8' : '#64748b')
+                : hoveredSensorData.latest_status === 'danger'
+                ? '#ef4444'
+                : hoveredSensorData.latest_value >= hoveredSensorData.threshold * 0.8
+                ? '#f59e0b'
+                : isDark
+                ? '#38bdf8'
+                : '#2563eb';
+
+              return (
+                <Group
+                  x={hoveredSensorObj.x + 22 - tooltipWidth / 2}
+                  y={hoveredSensorObj.y - tooltipHeight - 14}
+                  listening={false}
+                >
+                  <Rect
+                    width={tooltipWidth}
+                    height={tooltipHeight}
+                    fill={isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(255, 255, 255, 0.95)'}
+                    stroke={strokeColor}
+                    strokeWidth={1.5}
+                    cornerRadius={8}
+                    shadowColor="rgba(0, 0, 0, 0.3)"
+                    shadowBlur={12}
+                    shadowOffset={{ x: 0, y: 4 }}
+                    shadowOpacity={0.4}
+                  />
+                  <Text
+                    text={hoveredSensorData.name}
+                    x={10}
+                    y={10}
+                    fontSize={12}
+                    fontStyle="bold"
+                    fill={isDark ? '#f8fafc' : '#0f172a'}
+                  />
+                  <Text
+                    text={`${
+                      isMq2 ? '💨 Khói (MQ2)' : '🌡️ Nhiệt độ'
+                    } • ID: ${hoveredSensorData.device_id.slice(0, 8)}`}
+                    x={10}
+                    y={26}
+                    fontSize={9}
+                    fill={isDark ? '#94a3b8' : '#64748b'}
+                  />
+                  <Line
+                    points={[10, 40, 180, 40]}
+                    stroke={isDark ? '#334155' : '#e2e8f0'}
+                    strokeWidth={1}
+                  />
+                  <Text
+                    text={valueText}
+                    x={10}
+                    y={46}
+                    fontSize={10}
+                    fontStyle="bold"
+                    fill={valueColor}
+                  />
+                  <Text
+                    text={`Tình trạng: ${statusText}`}
+                    x={10}
+                    y={60}
+                    fontSize={10}
+                    fontStyle="bold"
+                    fill={statusColor}
+                  />
+                  <Text
+                    text={`Vị trí: ${hoveredSensorData.room_name || 'Chưa xác định'}`}
+                    x={10}
+                    y={75}
+                    fontSize={9}
+                    fill={isDark ? '#64748b' : '#94a3b8'}
+                  />
+                </Group>
+              );
+            })()}
+
           </Group>
         </Layer>
       </Stage>
 
       {/* Dynamic Controls panel overlays */}
       <div className="absolute top-4 right-4 z-20 flex flex-col gap-2">
+        <button
+          onClick={() => setIsFocused(!isFocused)}
+          className={`p-2.5 rounded-xl border flex items-center justify-center transition-all ${
+            isFocused
+              ? 'bg-blue-600 border-blue-500 hover:bg-blue-700 text-white shadow-md shadow-blue-500/25'
+              : isDark
+                ? 'bg-[#1E293B] border-slate-700 hover:bg-slate-800 text-white'
+                : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-800'
+          }`}
+          title={isFocused ? 'Khóa Sơ đồ' : 'Tương tác Sơ đồ'}
+        >
+          {isFocused ? <Unlock size={16} /> : <Lock size={16} />}
+        </button>
         <button
           onClick={() => handleZoom(1.2)}
           className={`p-2.5 rounded-xl border flex items-center justify-center transition-all ${
@@ -877,15 +967,19 @@ export function FloorPlanViewer({
 
       {/* Selected room helper or guides */}
       <div
-        className={`absolute bottom-4 left-4 z-20 px-4 py-2 rounded-xl text-xs border shadow-md flex items-center gap-2 ${
+        className={`absolute bottom-4 left-4 z-20 px-4 py-2 rounded-xl text-xs border shadow-md flex flex-wrap items-center gap-2 transition-all duration-300 ${
           isDark
-            ? 'bg-[#1E293B] border-slate-800 text-slate-300'
-            : 'bg-white border-slate-200 text-slate-600'
+            ? 'bg-[#1E293B]/90 border-slate-800 text-slate-300 backdrop-blur-sm'
+            : 'bg-white/95 border-slate-200 text-slate-600'
         }`}
       >
-        <span>🖱️ Kéo vùng trống để di chuyển • Cuộn chuột để phóng to/thu nhỏ</span>
+        <span>
+          {isFocused
+            ? '🖱️ Kéo để di chuyển • Cuộn chuột để zoom • Nhấn Esc để khóa'
+            : '🔒 Sơ đồ đang khóa • Bấm vào để kích hoạt di chuyển/thu phóng'}
+        </span>
         {selectedStartRoomId && (
-          <span className={`px-2 py-0.5 rounded font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30`}>
+          <span className="px-2 py-0.5 rounded font-semibold bg-blue-500/20 text-blue-400 border border-blue-500/30">
             📍 Điểm chọn: {objects.find(o => o.id === selectedStartRoomId)?.name}
           </span>
         )}
@@ -895,9 +989,24 @@ export function FloorPlanViewer({
       {evacuationActive && (
         <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/90 text-white text-xs font-bold rounded-lg shadow-[0_0_12px_rgba(16,185,129,0.5)] border border-emerald-400">
           <ShieldCheck size={14} className="animate-bounce" />
-          <span>ĐƯỜNG THOÁT HIỂM ĐANG HOẠT ĐỘNG</span>
+          <span>
+            {safePath?.mode === 'fallback'
+              ? 'HƯỚNG TỚI VỊ TRÍ XA ĐÁM CHÁY'
+              : safePath?.mode === 'mixed'
+                ? 'CHỈ DẪN THOÁT HIỂM & VÙNG AN TOÀN'
+                : 'ĐƯỜNG THOÁT HIỂM ĐANG HOẠT ĐỘNG'}
+          </span>
         </div>
       )}
+
+      {/* Floating Danger Sensors Panel (collapsible sidebar) */}
+      <DangerSensorsPanel
+        dangerSensors={dangerSensors}
+        floors={floors}
+        currentFloorId={sensors[0]?.floor_id || null}
+        onSelectSensor={(sensor) => onSelectDangerSensor && onSelectDangerSensor(sensor)}
+        isDark={isDark}
+      />
     </div>
   );
 }

@@ -17,6 +17,8 @@ import {
   LogOut,
   Menu,
   RefreshCw,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 
 export function DashboardPage() {
@@ -32,6 +34,20 @@ export function DashboardPage() {
   const [floors, setFloors] = useState<FloorItem[]>([]);
   const [selectedFloor, setSelectedFloor] = useState<number | null>(null);
   const [search, setSearch] = useState('');
+
+  const currentFloorIndex = floors.findIndex((f) => f.id === selectedFloor);
+
+  const handlePrevFloor = () => {
+    if (currentFloorIndex > 0) {
+      setSelectedFloor(floors[currentFloorIndex - 1].id);
+    }
+  };
+
+  const handleNextFloor = () => {
+    if (currentFloorIndex < floors.length - 1 && currentFloorIndex !== -1) {
+      setSelectedFloor(floors[currentFloorIndex + 1].id);
+    }
+  };
 
   // Pathfinding state
   const [safePath, setSafePath] = useState<SafePathResult | null>(null);
@@ -214,7 +230,7 @@ export function DashboardPage() {
   // Handle clicking a danger sensor from the floating panel
   const handleSelectDangerSensor = (sensor: SensorDevice) => {
     if (sensor.floor_id === null) return;
-    
+
     if (sensor.floor_id !== selectedFloor) {
       setPendingFocusSensorId(sensor.device_id);
       setSelectedFloor(sensor.floor_id);
@@ -351,8 +367,22 @@ export function DashboardPage() {
                 {/* Floor Selector Dropdown */}
                 <div className="flex items-center gap-2">
                   <span className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Floor Selector:
+                    Sơ đồ tầng:
                   </span>
+                  <button
+                    onClick={handlePrevFloor}
+                    disabled={currentFloorIndex <= 0}
+                    className={`p-1.5 rounded-xl border transition-all duration-200 ${
+                      currentFloorIndex <= 0
+                        ? 'opacity-40 cursor-not-allowed border-transparent text-slate-400'
+                        : isDark
+                          ? 'bg-slate-900 border-slate-800 text-slate-100 hover:border-slate-700 hover:bg-slate-800'
+                          : 'bg-white border-slate-200 text-slate-800 hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                    title="Tầng trước"
+                  >
+                    <ChevronLeft size={14} />
+                  </button>
                   <select
                     value={selectedFloor ?? ''}
                     onChange={(e) => setSelectedFloor(e.target.value ? Number(e.target.value) : null)}
@@ -368,6 +398,20 @@ export function DashboardPage() {
 
                     ))}
                   </select>
+                  <button
+                    onClick={handleNextFloor}
+                    disabled={currentFloorIndex === -1 || currentFloorIndex >= floors.length - 1}
+                    className={`p-1.5 rounded-xl border transition-all duration-200 ${
+                      currentFloorIndex === -1 || currentFloorIndex >= floors.length - 1
+                        ? 'opacity-40 cursor-not-allowed border-transparent text-slate-400'
+                        : isDark
+                          ? 'bg-slate-900 border-slate-800 text-slate-100 hover:border-slate-700 hover:bg-slate-800'
+                          : 'bg-white border-slate-200 text-slate-800 hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                    title="Tầng tiếp theo"
+                  >
+                    <ChevronRight size={14} />
+                  </button>
                 </div>
 
                 {/* Evacuation button */}

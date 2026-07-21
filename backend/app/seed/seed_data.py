@@ -204,16 +204,71 @@ def seed_database(db: Session) -> None:
     db.add_all([floor1, floor2, floorb1])
     db.flush()
 
+    # ============================================================
+    # TẦNG 1 - BUILDING A: Topology thực của mạng ESP32 ESP-NOW
+    # Vật lý: ExitA -- Sat1 -- Master -- Sat2 -- Sat3 -- ExitB
+    # Canvas: 1100x650
+    # ============================================================
+    # Vị trí trung tâm cho từng "node" vật lý:
+    #  - Master  : ~(430, 300) => temp: (405,278), mq2: (455,278)
+    #  - Sat 1   : ~(600, 165) => temp: (575,143), mq2: (625,143)
+    #  - Sat 2   : ~(650, 390) => temp: (625,368), mq2: (675,368)
+    #  - Sat 3   : ~(830, 390) => temp: (805,368), mq2: (855,368)
+    #  - Exit A  : ~(790, 100)
+    #  - Exit B  : ~(980, 390)
+    #  - Stairs  : ~(160, 290) (lên Tầng 2)
+
+    # Sensor objects - ID khớp chính xác device_id ESP32
+    f1_temp_master = make_obj("temp-master", "temp", 405, 278, width=48, height=48, name="Temp Master")
+    f1_mq2_master  = make_obj("mq2-master",  "mq2",  460, 278, width=48, height=48, name="MQ2 Master")
+    f1_temp_sat1   = make_obj("temp-sat-1",  "temp", 565, 148, width=48, height=48, name="Temp Vệ tinh 1")
+    f1_mq2_sat1    = make_obj("mq2-sat-1",   "mq2",  620, 148, width=48, height=48, name="MQ2 Vệ tinh 1")
+    f1_temp_sat2   = make_obj("temp-sat-2",  "temp", 620, 378, width=48, height=48, name="Temp Vệ tinh 2")
+    f1_mq2_sat2    = make_obj("mq2-sat-2",   "mq2",  675, 378, width=48, height=48, name="MQ2 Vệ tinh 2")
+    f1_temp_sat3   = make_obj("temp-sat-3",  "temp", 805, 378, width=48, height=48, name="Temp Vệ tinh 3")
+    f1_mq2_sat3    = make_obj("mq2-sat-3",   "mq2",  860, 378, width=48, height=48, name="MQ2 Vệ tinh 3")
+
+    # Exits & Stairs
+    f1_exit_a  = make_obj("exit-a",   "exit",   870, 100, width=100, height=38, name="LỐI THOÁT A", color="#22c55e")
+    f1_exit_b  = make_obj("exit-b",   "exit",   960, 378, width=100, height=38, name="LỐI THOÁT B", color="#22c55e")
+    f1_stairs1 = make_obj("stairs-1", "stairs", 145, 278, width=88, height=72,  name="Cầu thang")
+
+    # Label
+    f1_label = make_obj("label-1", "label", 65, 58, width=500, height=38,
+                        name="TẦNG 1 • ESP32 MESH NETWORK (Building A)", fontSize=20, color="#e2e8f0")
+
+    # Floor base & walls
+    f1_base      = make_obj("floor-base", "floor_base", 35, 45, width=1030, height=550,
+                             name="Mặt bằng tầng 1", color="#172033", locked=True)
+    f1_wall_top  = make_obj("wall-top",    "wall", 55, 125, width=990, height=8, name="Tường", color="#475569")
+    f1_wall_bot  = make_obj("wall-bottom", "wall", 55, 545, width=990, height=8, name="Tường", color="#475569")
+
+    # LED wires — kết nối theo topology vật lý ESP-NOW:
+    # Edge 1: Sat1 ↔ ExitA  (LED 0-5)
+    # Edge 2: Sat1 ↔ Master  (LED 6-13)
+    # Edge 3: Master ↔ Sat2  (LED 14-21)
+    # Edge 4: Sat2 ↔ Sat3   (LED 22-26)
+    # Edge 5: Sat3 ↔ ExitB  (LED 27-29)
+    f1_wire_sat1_exita  = make_wire("f1-wire-sat1-exita",  f1_temp_sat1,   f1_exit_a)
+    f1_wire_sat1_master = make_wire("f1-wire-sat1-master", f1_temp_sat1,   f1_temp_master)
+    f1_wire_master_sat2 = make_wire("f1-wire-master-sat2", f1_temp_master, f1_temp_sat2)
+    f1_wire_sat2_sat3   = make_wire("f1-wire-sat2-sat3",   f1_temp_sat2,   f1_temp_sat3)
+    f1_wire_sat3_exitb  = make_wire("f1-wire-sat3-exitb",  f1_temp_sat3,   f1_exit_b)
+    f1_wire_master_stair = make_wire("f1-wire-master-stair", f1_temp_master, f1_stairs1)
+
     floor1_objects = [
-        make_obj("room-lobby", "room", 80, 80, width=340, height=180, name="Lobby", color="#1f2937", textColor="#f9fafb"),
-        make_obj("room-control", "room", 480, 70, width=260, height=160, name="Control Room", color="#0f766e", textColor="#f9fafb"),
-        make_obj("door-1", "door", 405, 155, width=18, height=52, name="Door"),
-        make_obj("exit-1", "exit", 760, 120, width=80, height=30, name="EXIT", color="#22c55e"),
-        make_obj("stairs-1", "stairs", 760, 250, width=80, height=60, name="Stairs"),
-        make_obj("mq2-01", "mq2", 230, 290, width=40, height=40, name="MQ2-Lobby"),
-        make_obj("temp-01", "temp", 540, 250, width=40, height=40, name="Temp-Control"),
-        *[make_obj(f"led-l1-{i}", "led", 120 + i * 32, 380, width=18, height=18, name=f"LED {i}", nodeStatus="safe" if i % 4 else "danger") for i in range(1, 13)],
-        make_obj("label-1", "label", 90, 40, width=160, height=40, name="Escape Mesh - Floor 1", fontSize=22, color="#f8fafc"),
+        f1_base, f1_wall_top, f1_wall_bot, f1_label,
+        f1_stairs1, f1_exit_a, f1_exit_b,
+        f1_temp_master, f1_mq2_master,
+        f1_temp_sat1,   f1_mq2_sat1,
+        f1_temp_sat2,   f1_mq2_sat2,
+        f1_temp_sat3,   f1_mq2_sat3,
+        f1_wire_sat1_exita,
+        f1_wire_sat1_master,
+        f1_wire_master_sat2,
+        f1_wire_sat2_sat3,
+        f1_wire_sat3_exitb,
+        f1_wire_master_stair,
     ]
     floor2_objects = [
         make_obj("room-meeting", "room", 110, 90, width=280, height=170, name="Meeting Room", color="#1d4ed8", textColor="#f8fafc"),

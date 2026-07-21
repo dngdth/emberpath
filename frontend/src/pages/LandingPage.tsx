@@ -6,6 +6,7 @@ import { FeaturesSection } from '../components/Landing/FeaturesSection';
 import { HowItWorks } from '../components/Landing/HowItWorks';
 import { BottomCTA } from '../components/Landing/BottomCTA';
 import { Footer } from '../components/Landing/Footer';
+import { ConsultationSection } from '../components/Landing/ConsultationSection';
 import { useThemeStore } from '../store/themeStore';
 
 export function LandingPage() {
@@ -49,6 +50,8 @@ export function LandingPage() {
 
       {/* How It Works (Emergency Operation Journey) */}
       <HowItWorks isDark={isDark} />
+
+      <ConsultationSection isDark={isDark} />
 
       {/* Bottom CTA */}
       <BottomCTA isDark={isDark} />

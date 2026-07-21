@@ -9,13 +9,16 @@ from app.api.routes_auth import router as auth_router
 from app.api.routes_dashboard import router as dashboard_router
 from app.api.routes_floors import router as floors_router
 from app.api.routes_sensors import ingest_router, router as sensors_router
+from app.api.routes_admin import router as admin_router
+from app.api.routes_leads import router as leads_router
 from app.auth.dependencies import get_current_user
 from app.auth.security import decode_token
 from app.core.config import settings
 from app.db.base import Base
 from app.db.schema import ensure_sqlite_columns
 from app.db.session import SessionLocal, engine
-from app.models.user import User
+from app.models.user import User, UserRole
+from app.models.audit_log import AuditLog
 from app.seed.seed_data import seed_database
 # from app.services.simulator import simulator_loop  # Simulator da tat
 from app.services.websocket_manager import ws_manager
@@ -53,6 +56,8 @@ app.include_router(dashboard_router)
 app.include_router(sensors_router)
 app.include_router(ingest_router)
 app.include_router(floors_router)
+app.include_router(leads_router)
+app.include_router(admin_router)
 
 
 @app.get("/")
@@ -100,6 +105,24 @@ async def sensor_socket(websocket: WebSocket):
         if not user:
             await websocket.close(code=4401)
             return
+
+        impersonator_id = payload.get("impersonator_id")
+        if impersonator_id is not None:
+            impersonator = db.scalar(
+                select(User).where(User.id == int(impersonator_id), User.role == UserRole.SUPER_ADMIN.value)
+            )
+            if not impersonator or payload.get("building_id") != user.building_id:
+                await websocket.close(code=4401)
+                return
+            db.add(AuditLog(
+                admin_id=impersonator.id,
+                building_id=user.building_id,
+                action="impersonated_websocket_connected",
+                method="WS",
+                path="/ws/sensors",
+                ip_address=websocket.client.host if websocket.client else None,
+            ))
+            db.commit()
 
         await ws_manager.connect(user.building_id, websocket)
         await websocket.send_json({"type": "connected", "buildingId": user.building_id, "building": user.building.name})

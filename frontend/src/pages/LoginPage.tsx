@@ -29,7 +29,7 @@ export function LoginPage() {
 
     try {
       await login(email, password);
-      navigate('/dashboard');
+      navigate(useAuthStore.getState().user?.role === 'super_admin' ? '/admin' : '/dashboard');
     } catch (err) {
       const message =
         (err as AxiosError<{ detail?: string }>).response?.data?.detail ||

@@ -38,7 +38,7 @@ interface Props {
   snapEnabled: boolean;
   onStageChange: (patch: { scale?: number; position?: { x: number; y: number } }) => void;
   onAddObject: (type: FloorPlanObject['type'], x: number, y: number) => void;
-  onAddCustomObject?: (obj: FloorPlanObject) => void;
+  onAddCustomObject?: (obj: FloorPlanObject | FloorPlanObject[]) => void;
   onSelect: (id: string, append: boolean) => void;
   onClearSelection: () => void;
   onUpdateObject: (id: string, patch: Partial<FloorPlanObject>) => void;

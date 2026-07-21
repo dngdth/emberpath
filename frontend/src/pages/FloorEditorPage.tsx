@@ -676,8 +676,9 @@ export function FloorEditorPage() {
     selection.setSelectedIds(ids);
   }, [selection]);
 
-  const handleAddCustomObject = useCallback((obj: FloorPlanObject) => {
-    history.set([...history.state, obj]);
+  const handleAddCustomObject = useCallback((obj: FloorPlanObject | FloorPlanObject[]) => {
+    const nextObjects = Array.isArray(obj) ? obj : [obj];
+    history.set([...history.state, ...nextObjects]);
   }, [history]);
 
   const toggleSnap = useCallback(() => {

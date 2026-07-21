@@ -19,15 +19,15 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/register", response_model=TokenResponse)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     if payload.password != payload.confirm_password:
-        raise HTTPException(status_code=400, detail="Password confirmation does not match")
+        raise HTTPException(status_code=400, detail="Mật khẩu xác nhận không khớp")
 
     if db.scalar(select(User).where(User.email == payload.email.lower())):
-        raise HTTPException(status_code=400, detail="Email is already registered")
+        raise HTTPException(status_code=400, detail="Email này đã được đăng ký")
 
     building_code = payload.building_code.strip().upper()
     building = db.scalar(select(Building).where(Building.code == building_code))
     if building:
-        raise HTTPException(status_code=400, detail="Building code already exists")
+        raise HTTPException(status_code=400, detail="Mã tòa nhà đã tồn tại")
 
     building = Building(name=payload.building_name.strip(), code=building_code)
     db.add(building)

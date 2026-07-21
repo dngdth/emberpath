@@ -8,6 +8,7 @@ from app.db.base import Base
 
 
 class UserRole(str, Enum):
+    SUPER_ADMIN = "super_admin"
     ADMIN_BUILDING = "admin_building"
     OPERATOR = "operator"
 

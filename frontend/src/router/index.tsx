@@ -6,11 +6,21 @@ import { DashboardPage } from '../pages/DashboardPage';
 import { FloorEditorPage } from '../pages/FloorEditorPage';
 import { LandingPage } from '../pages/LandingPage';
 import { HistoryPage } from '../pages/HistoryPage';
+import { AdminPage } from '../pages/AdminPage';
 
 function ProtectedRoute({ children, adminOnly }: { children: JSX.Element; adminOnly?: boolean }) {
   const { token, user } = useAuthStore();
   if (!token) return <Navigate to="/login" replace />;
+  if (!user) return null;
   if (adminOnly && user?.role !== 'admin_building') return <Navigate to="/dashboard" replace />;
+  return children;
+}
+
+function SuperAdminRoute({ children }: { children: JSX.Element }) {
+  const { token, user } = useAuthStore();
+  if (!token) return <Navigate to="/login" replace />;
+  if (!user) return null;
+  if (user?.role !== 'super_admin') return <Navigate to="/dashboard" replace />;
   return children;
 }
 
@@ -23,6 +33,7 @@ export function AppRouter() {
       <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
       <Route path="/history" element={<ProtectedRoute><HistoryPage /></ProtectedRoute>} />
       <Route path="/editor" element={<ProtectedRoute adminOnly><FloorEditorPage /></ProtectedRoute>} />
+      <Route path="/admin" element={<SuperAdminRoute><AdminPage /></SuperAdminRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

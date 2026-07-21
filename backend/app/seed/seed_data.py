@@ -181,8 +181,27 @@ def _seed_gradient_demo(db: Session) -> None:
     db.commit()
 
 
+def _ensure_super_admin(db: Session) -> None:
+    if db.scalar(select(User).where(User.role == UserRole.SUPER_ADMIN.value)):
+        return
+    building = db.scalar(select(Building).order_by(Building.id))
+    if not building:
+        return
+    db.add(
+        User(
+            name="Emberpath Super Admin",
+            email="superadmin@emberpath.demo",
+            password_hash=get_password_hash("123456"),
+            role=UserRole.SUPER_ADMIN.value,
+            building_id=building.id,
+        )
+    )
+    db.commit()
+
+
 def seed_database(db: Session) -> None:
     if db.scalar(select(Building).limit(1)):
+        _ensure_super_admin(db)
         _seed_gradient_demo(db)
         return
 
@@ -298,4 +317,5 @@ def seed_database(db: Session) -> None:
         db.add(SensorReading(device_id=device.id, value=latest_value, status=status, unit=unit, created_at=now))
 
     db.commit()
+    _ensure_super_admin(db)
     _seed_gradient_demo(db)

@@ -9,6 +9,15 @@ interface DemoAccountsProps {
 export function DemoAccounts({ onSelect, isDark, disabled }: DemoAccountsProps) {
   const accounts = [
     {
+      role: 'Super Admin',
+      email: 'superadmin@emberpath.demo',
+      pass: '123456',
+      desc: 'Quản lý ticket, khách hàng và hỗ trợ qua impersonation.',
+      icon: ShieldCheck,
+      iconColor: 'text-violet-500',
+      bgColor: 'hover:border-violet-500/50 hover:bg-violet-500/5',
+    },
+    {
       role: 'Admin tòa nhà',
       email: 'admin@buildinga.demo',
       pass: '123456',
@@ -52,7 +61,7 @@ export function DemoAccounts({ onSelect, isDark, disabled }: DemoAccountsProps) 
         </span>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         {accounts.map((acc, index) => {
           const Icon = acc.icon;
           return (

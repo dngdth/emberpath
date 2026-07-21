@@ -13,7 +13,7 @@ interface DangerSensorsPanelProps {
 }
 
 // Bật/tắt mock tình huống nguy hiểm để test âm thanh & giao diện. Sửa thành false để tắt mock.
-const ENABLE_MOCK_DANGER = true;
+const ENABLE_MOCK_DANGER = false;
 
 export function DangerSensorsPanel({
   dangerSensors,

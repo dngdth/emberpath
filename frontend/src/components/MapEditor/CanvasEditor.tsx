@@ -535,6 +535,19 @@ function CanvasEditorComponent(props: Props) {
       onClick: (event: Konva.KonvaEventObject<MouseEvent>) => {
         if (isSpacePressed || event.evt.button === 1) return;
         event.cancelBubble = true;
+
+        const isPlacementTool = props.activeTool !== 'select' && props.activeTool !== 'eraser' && !props.activeTool.endsWith('-pen');
+        if (isPlacementTool) {
+          const stage = event.target.getStage();
+          const pointer = stage?.getPointerPosition();
+          if (pointer) {
+            const worldX = (pointer.x - props.position.x) / props.scale;
+            const worldY = (pointer.y - props.position.y) / props.scale;
+            props.onAddObject(props.activeTool as FloorPlanObject['type'], worldX, worldY);
+          }
+          return;
+        }
+
         props.onSelect(object.id, event.evt.shiftKey);
         const isPenTool = props.activeTool === 'floor_base-pen';
         if (isPenTool) {
@@ -543,6 +556,19 @@ function CanvasEditorComponent(props: Props) {
       },
       onTap: (event: Konva.KonvaEventObject<Event>) => {
         event.cancelBubble = true;
+
+        const isPlacementTool = props.activeTool !== 'select' && props.activeTool !== 'eraser' && !props.activeTool.endsWith('-pen');
+        if (isPlacementTool) {
+          const stage = event.target.getStage();
+          const pointer = stage?.getPointerPosition();
+          if (pointer) {
+            const worldX = (pointer.x - props.position.x) / props.scale;
+            const worldY = (pointer.y - props.position.y) / props.scale;
+            props.onAddObject(props.activeTool as FloorPlanObject['type'], worldX, worldY);
+          }
+          return;
+        }
+
         props.onSelect(object.id, false);
         const isPenTool = props.activeTool === 'floor_base-pen';
         if (isPenTool) {

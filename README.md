@@ -72,6 +72,7 @@ Frontend mặc định chạy ở: `http://127.0.0.1:5173`
 - `admin@buildinga.demo` / `123456`
 - `operator@buildinga.demo` / `123456`
 - `admin@buildingb.demo` / `123456`
+- `superadmin@emberpath.demo` / `123456` (CRM và quản trị khách hàng)
 
 ## API chính
 
@@ -86,6 +87,13 @@ Frontend mặc định chạy ở: `http://127.0.0.1:5173`
 - `GET /floors`
 - `GET /floors/{floorId}/plan`
 - `PUT /floors/{floorId}/plan`
+- `POST /leads` (form tư vấn công khai)
+- `GET /admin/leads`
+- `PATCH /admin/leads/{leadId}/status`
+- `GET /admin/buildings`
+- `POST /admin/buildings/{buildingId}/impersonate`
+- `POST /admin/users/{userId}/reset-password`
+- `GET /admin/audit-logs`
 
 ## MVP hiện có
 

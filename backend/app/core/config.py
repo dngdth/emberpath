@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     secret_key: str = "change-me-in-production"
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24
+    impersonation_token_expire_minutes: int = 30
     database_url: str = DEFAULT_DATABASE_URL
     cors_origins: list[str] = [
         "http://localhost:5173",

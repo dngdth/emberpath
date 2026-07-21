@@ -15,6 +15,7 @@ export function Navbar({ isDark }: NavbarProps) {
     { label: 'Vấn đề & Giải pháp', href: '#problem-solution' },
     { label: 'Tính năng', href: '#features' },
     { label: 'Quy trình hoạt động', href: '#how-it-works' },
+    { label: 'Nhận tư vấn', href: '#consultation' },
   ];
 
   const handleScroll = (e: React.MouseEvent<HTMLAnchorElement>, href: string) => {

@@ -233,7 +233,7 @@ export const PolygonVertexHandles: React.FC<PolygonVertexHandlesProps> = React.m
   }
 
   return (
-    <Group x={targetObj.x} y={targetObj.y}>
+    <Group id={`vertex-handles-${targetObj.id}`} x={targetObj.x} y={targetObj.y}>
       {handles}
     </Group>
   );

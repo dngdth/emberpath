@@ -651,13 +651,17 @@ export function FloorEditorPage() {
         if (obj.type === 'connector') return obj;
         return {
           ...obj,
-          x: obj.x + shiftX,
-          y: obj.y + shiftY,
+          x: obj.x - shiftX,
+          y: obj.y - shiftY,
         };
       });
       history.set(updatedObjects);
+      zoomPan.setPosition({
+        x: zoomPan.position.x + shiftX * zoomPan.scale,
+        y: zoomPan.position.y + shiftY * zoomPan.scale,
+      });
     }
-  }, [history]);
+  }, [history, zoomPan]);
 
   const handleStageChange = useCallback((patch: { scale?: number; position?: { x: number; y: number } }) => {
     if (patch.scale !== undefined) zoomPan.setScale(patch.scale);

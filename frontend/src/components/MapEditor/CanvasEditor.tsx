@@ -617,6 +617,16 @@ function CanvasEditorComponent(props: Props) {
       onDragMove: (event: Konva.KonvaEventObject<DragEvent>) => {
         const next = { x: event.target.x(), y: event.target.y() };
         pendingGuideTargetRef.current = { ...object, ...next };
+
+        // Real-time update of polygon vertex handles position
+        if (object.shapeType === 'polygon') {
+          const handlesGroup = event.target.getStage()?.findOne(`#vertex-handles-${object.id}`);
+          if (handlesGroup) {
+            handlesGroup.x(next.x);
+            handlesGroup.y(next.y);
+          }
+        }
+
         if (guideFrameRef.current === null && performance.now() - lastGuideUpdateRef.current >= 32) {
           guideFrameRef.current = requestAnimationFrame(() => {
             guideFrameRef.current = null;

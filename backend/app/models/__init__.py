@@ -3,3 +3,5 @@ from app.models.user import User
 from app.models.floor import Floor
 from app.models.plan import FloorPlan, PlanObject
 from app.models.sensor import SensorDevice, SensorReading
+from app.models.lead import CustomerLead
+from app.models.audit_log import AuditLog

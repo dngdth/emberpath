@@ -1,10 +1,20 @@
-import { AuthResponse, User } from '../types/auth';
+import { AuditLog, AuthResponse, CustomerBuilding, CustomerLead, LeadStatus, User } from '../types/auth';
 import { FloorItem, FloorPlanObject, FloorPlanResponse, SafePathResult } from '../types/editor';
 import { DashboardSummary, SensorDevice, SensorReading } from '../types/sensor';
 import api, { getApiBaseUrl } from '../utils/api';
 import { getToken } from '../utils/authHelpers';
 
 export type RegisterPayload = Record<string, string>;
+
+export type LeadPayload = {
+  full_name: string;
+  phone: string;
+  email: string;
+  company_name?: string;
+  facility_type: string;
+  expected_scale: string;
+  requirements?: string;
+};
 
 export type FloorPlanSavePayload = {
   objects: FloorPlanObject[];
@@ -45,6 +55,58 @@ export const authApi = {
   },
   async me() {
     const { data } = await api.get<User>('/auth/me');
+    return data;
+  },
+};
+
+export const leadsApi = {
+  async create(payload: LeadPayload) {
+    const { data } = await api.post<{ id: number; message: string }>('/leads', payload);
+    return data;
+  },
+};
+
+export const adminApi = {
+  async leads() {
+    const { data } = await api.get<CustomerLead[]>('/admin/leads');
+    return data;
+  },
+  async updateLeadStatus(leadId: number, status: LeadStatus, cancellationReason?: string) {
+    const { data } = await api.patch<{
+      lead: CustomerLead;
+      provisioned_account: null | {
+        building_id: number;
+        building_name: string;
+        email: string;
+        temporary_password: string;
+      };
+    }>(`/admin/leads/${leadId}/status`, {
+      status,
+      cancellation_reason: cancellationReason || null,
+    });
+    return data;
+  },
+  async buildings() {
+    const { data } = await api.get<CustomerBuilding[]>('/admin/buildings');
+    return data;
+  },
+  async impersonate(buildingId: number) {
+    const { data } = await api.post<AuthResponse & { expires_in_seconds: number }>(
+      `/admin/buildings/${buildingId}/impersonate`,
+    );
+    return data;
+  },
+  async resetPassword(userId: number) {
+    const { data } = await api.post<{
+      user_id: number;
+      email: string;
+      temporary_password: string;
+      message: string;
+    }>(`/admin/users/${userId}/reset-password`);
+    return data;
+  },
+  async auditLogs() {
+    const { data } = await api.get<AuditLog[]>('/admin/audit-logs');
     return data;
   },
 };

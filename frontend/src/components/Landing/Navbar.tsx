@@ -5,9 +5,10 @@ import { SwitchTheme } from '../UI/SwitchTheme';
 
 interface NavbarProps {
   isDark: boolean;
+  onOpenConsultation: () => void;
 }
 
-export function Navbar({ isDark }: NavbarProps) {
+export function Navbar({ isDark, onOpenConsultation }: NavbarProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { token, logout } = useAuthStore();
 
@@ -99,12 +100,12 @@ export function Navbar({ isDark }: NavbarProps) {
                 >
                   Đăng nhập
                 </a>
-                <a
-                  href="/register"
+                <button
+                  onClick={onOpenConsultation}
                   className="rounded-xl bg-[#F97316] px-4 py-2 text-sm font-semibold text-white hover:bg-orange-600 transition-all shadow-md shadow-orange-500/10"
                 >
                   Đăng ký
-                </a>
+                </button>
               </div>
             )}
           </div>
@@ -180,12 +181,15 @@ export function Navbar({ isDark }: NavbarProps) {
                 >
                   <LogIn className="h-4 w-4" /> Đăng nhập
                 </a>
-                <a
-                  href="/register"
+                <button
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    onOpenConsultation();
+                  }}
                   className="flex items-center justify-center w-full rounded-xl bg-[#F97316] py-2.5 text-sm font-semibold text-white"
                 >
                   Đăng ký
-                </a>
+                </button>
               </>
             )}
           </div>

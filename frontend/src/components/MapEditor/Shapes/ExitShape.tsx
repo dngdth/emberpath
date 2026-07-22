@@ -15,7 +15,7 @@ export const ExitShape: React.FC<ExitShapeProps> = React.memo(({
 }) => {
   const width = object.width || 80;
   const height = object.height || 40;
-  const fill = object.color || '#2ea85f';
+  const fill = object.color || '#22c55e';
 
   return (
     <Group {...commonProps}>

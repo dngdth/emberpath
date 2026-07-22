@@ -43,6 +43,9 @@ export interface CustomerBuilding {
   id: number;
   name: string;
   code: string;
+  phone?: string | null;
+  facility_type?: string | null;
+  expected_scale?: string | null;
   created_at: string;
   users: CustomerAccount[];
 }

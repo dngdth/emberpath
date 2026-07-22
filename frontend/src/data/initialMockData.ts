@@ -44,6 +44,7 @@ export function createNewObject(type: string, x = 120, y = 120): FloorPlanObject
     connector: 'Đường nối',
     sensor: 'Cảm biến',
     led_wire: 'Dây LED',
+    image: 'Hình ảnh sơ đồ',
   }[actualType] || 'Vật thể';
 
   const shapeType = type.endsWith('-pen') ? 'polygon' : 'rect';

@@ -19,13 +19,18 @@ export const LabelShape: React.FC<LabelShapeProps> = React.memo(({
       : (object.textColor || object.color)
     : (isDark ? '#f8fafc' : '#1e293b');
 
+  const width = object.width || 180;
+  const height = object.height || 40;
+
   return (
-    <Group {...commonProps}>
+    <Group {...commonProps} width={width} height={height}>
       <Text
         text={object.name || 'Label'}
-        fontSize={object.fontSize || 20}
+        fontSize={object.fontSize || 22}
         fill={fill}
         fontStyle="bold"
+        width={width}
+        wrap="word"
       />
     </Group>
   );

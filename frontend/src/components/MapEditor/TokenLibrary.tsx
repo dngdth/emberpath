@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import clsx from 'clsx';
 import {
   RectangleHorizontal,
@@ -10,10 +10,13 @@ import {
   Cable,
   Fence,
   Type,
-  LayoutGrid
+  LayoutGrid,
+  Image as ImageIcon,
+  Upload,
 } from 'lucide-react';
 import { tokenLibrary } from '../../data/initialMockData';
 import { useThemeStore } from '../../store/themeStore';
+import { FloorPlanObject } from '../../types/editor';
 import { DragPreviews } from './SubComponents/DragPreviews';
 
 function getIcon(type: string) {
@@ -279,12 +282,60 @@ function getCardStyles(type: string, isActive: boolean, isDark: boolean) {
 export function TokenLibrary({
   activeTool,
   onSelect,
+  onAddCustomObject,
 }: {
   activeTool: string;
   onSelect: (type: string) => void;
+  onAddCustomObject?: (obj: FloorPlanObject) => void;
 }) {
   const { darkMode } = useThemeStore();
   const isDark = darkMode;
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    if (!file.type.startsWith('image/')) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      if (!dataUrl) return;
+
+      const img = new Image();
+      img.onload = () => {
+        let width = img.naturalWidth || 800;
+        let height = img.naturalHeight || 600;
+        const maxDim = 1000;
+        if (width > maxDim || height > maxDim) {
+          const ratio = Math.min(maxDim / width, maxDim / height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+        }
+
+        const newImg: FloorPlanObject = {
+          id: `image-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          type: 'image',
+          name: file.name ? file.name.replace(/\.[^/.]+$/, '') : 'Hình ảnh sơ đồ',
+          x: 100,
+          y: 100,
+          width,
+          height,
+          rotation: 0,
+          src: dataUrl,
+          opacity: 0.5,
+          visible: true,
+          locked: false,
+        };
+
+        onAddCustomObject?.(newImg);
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
 
   // Group tokens: Pen tools vs Drag & Drop tools
   const penTools = React.useMemo(() => tokenLibrary.filter((t) => t.type.endsWith('-pen')), []);
@@ -301,13 +352,13 @@ export function TokenLibrary({
           isPen
             ? undefined
             : (e) => {
-                e.dataTransfer.setData('text/plain', token.type);
-                const previewEl = document.getElementById(`drag-preview-${token.type}`);
-                if (previewEl) {
-                  const offset = getDragImageOffset(token.type);
-                  e.dataTransfer.setDragImage(previewEl, offset.x, offset.y);
-                }
+              e.dataTransfer.setData('text/plain', token.type);
+              const previewEl = document.getElementById(`drag-preview-${token.type}`);
+              if (previewEl) {
+                const offset = getDragImageOffset(token.type);
+                e.dataTransfer.setDragImage(previewEl, offset.x, offset.y);
               }
+            }
         }
         onClick={() => {
           if (activeTool === token.type) {
@@ -377,6 +428,44 @@ export function TokenLibrary({
 
   return (
     <div className="space-y-4">
+      {/* Section 0: Background Blueprint Image */}
+      <div>
+        <div className="flex items-center gap-2 px-1 mb-2 select-none">
+          <ImageIcon size={11} className="text-amber-500 dark:text-amber-400" />
+          <span className="text-[9px] font-extrabold uppercase tracking-widest text-amber-500 dark:text-amber-400">Ảnh mặt bằng nền (Trace)</span>
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleFileChange}
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className={clsx(
+            'w-full rounded-2xl border px-4 py-3 text-left transition-all duration-200 select-none flex items-start gap-3 hover:scale-[1.01] shadow-sm cursor-pointer',
+            isDark
+              ? 'border-amber-500/30 bg-amber-950/20 hover:bg-amber-950/40 text-amber-300'
+              : 'border-amber-200 bg-amber-50/80 hover:bg-amber-100 text-amber-900'
+          )}
+        >
+          <div className="p-2 rounded-xl shrink-0 flex items-center justify-center bg-amber-500/20 text-amber-400">
+            <Upload size={18} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold leading-tight truncate">Tải ảnh sơ đồ / Ctrl+V</span>
+              <span className="text-[9px] font-mono opacity-80 uppercase">UPLOAD</span>
+            </div>
+            <div className="mt-1 text-[10px] leading-tight opacity-75">
+              Chèn ảnh mặt bằng (PNG/JPG)
+            </div>
+          </div>
+        </button>
+      </div>
+
       {/* Section 1: Drawing Pen Tools */}
       <div>
         <div className="flex items-center gap-2 px-1 mb-2 select-none">

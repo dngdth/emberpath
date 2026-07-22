@@ -1,7 +1,7 @@
 import React from 'react';
 import { FloorListSection } from './FloorListSection';
 import { TokenLibrary } from './TokenLibrary';
-import { FloorItem } from '../../types/editor';
+import { FloorItem, FloorPlanObject } from '../../types/editor';
 import clsx from 'clsx';
 
 interface LeftSidebarProps {
@@ -26,6 +26,7 @@ interface LeftSidebarProps {
   floorBelow: FloorItem | null;
   showBelowBaseline: boolean;
   setShowBelowBaseline: (val: boolean) => void;
+  onAddCustomObject?: (obj: FloorPlanObject) => void;
 }
 
 export const LeftSidebar: React.FC<LeftSidebarProps> = React.memo(({
@@ -50,6 +51,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = React.memo(({
   floorBelow,
   showBelowBaseline,
   setShowBelowBaseline,
+  onAddCustomObject,
 }) => {
   return (
     <aside
@@ -122,7 +124,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = React.memo(({
             </button>
           </div>
           <div className="flex-1 overflow-y-auto pr-1 scrollbar-thin">
-            <TokenLibrary activeTool={activeTool} onSelect={onToolPick} />
+            <TokenLibrary activeTool={activeTool} onSelect={onToolPick} onAddCustomObject={onAddCustomObject} />
           </div>
         </div>
       )}

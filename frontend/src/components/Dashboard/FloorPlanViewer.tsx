@@ -101,7 +101,7 @@ export function FloorPlanViewer({
 
   const hoveredSensorData = useMemo(() => {
     if (!hoveredSensorId) return null;
-    const found = sensors.find((s) => s.device_id === hoveredSensorId);
+    const found = sensors.find((s) => s.device_id === hoveredSensorId || s.device_id.endsWith(hoveredSensorId));
     if (found) return found;
 
     // Fallback info for mock/unlinked sensors
@@ -377,7 +377,8 @@ export function FloorPlanViewer({
     
     objects.forEach((obj) => {
       if (obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp') {
-        if (dangerDeviceIds.has(obj.id)) {
+        const hasDanger = Array.from(dangerDeviceIds).some(did => did === obj.id || did.endsWith(obj.id));
+        if (hasDanger) {
           dangerPositions.push({ x: obj.x, y: obj.y });
         }
       }
@@ -586,9 +587,10 @@ export function FloorPlanViewer({
     }
 
     if (obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp') {
-      const isDanger = dangerDeviceIds.has(obj.id) || obj.nodeStatus === 'danger';
-      const isWarning = warningDeviceIds.has(obj.id);
-      const reading = sensorValues.get(obj.id);
+      const isDanger = Array.from(dangerDeviceIds).some(did => did === obj.id || did.endsWith(obj.id)) || obj.nodeStatus === 'danger';
+      const isWarning = Array.from(warningDeviceIds).some(did => did === obj.id || did.endsWith(obj.id));
+      const matchKey = Array.from(sensorValues.keys()).find(k => k === obj.id || k.endsWith(obj.id));
+      const reading = matchKey ? sensorValues.get(matchKey) : undefined;
 
       return (
         <SensorShape

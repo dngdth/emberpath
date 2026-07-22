@@ -105,8 +105,10 @@ export const adminApi = {
     }>(`/admin/users/${userId}/reset-password`);
     return data;
   },
-  async auditLogs() {
-    const { data } = await api.get<AuditLog[]>('/admin/audit-logs');
+  async auditLogs(limit: number = 50, offset: number = 0) {
+    const { data } = await api.get<AuditLog[]>('/admin/audit-logs', {
+      params: { limit, offset },
+    });
     return data;
   },
 };

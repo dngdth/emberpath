@@ -7,9 +7,10 @@ interface Props {
   isDark: boolean;
   isOpen: boolean;
   onClose: () => void;
+  onOpen?: () => void;
 }
 
-export function DashboardSidebar({ activeTab: propActiveTab, isDark, isOpen, onClose }: Props) {
+export function DashboardSidebar({ activeTab: propActiveTab, isDark, isOpen, onClose, onOpen }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuthStore();
@@ -64,11 +65,20 @@ export function DashboardSidebar({ activeTab: propActiveTab, isDark, isOpen, onC
 
   return (
     <>
-      {/* Mobile Backdrop Overlay */}
+      {/* Backdrop Overlay (closes sidebar when clicking outside) */}
       {isOpen && (
         <div
           onClick={onClose}
-          className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden transition-opacity duration-300"
+          className="fixed inset-0 z-40 bg-transparent transition-opacity duration-300"
+        />
+      )}
+
+      {/* Hover Trigger Zone on Left Edge of the screen */}
+      {!isOpen && onOpen && (
+        <div
+          onMouseEnter={onOpen}
+          className="fixed left-0 top-0 bottom-0 w-3 z-40 bg-transparent cursor-pointer"
+          title="Rê chuột vào đây để mở menu"
         />
       )}
 

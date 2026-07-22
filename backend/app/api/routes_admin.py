@@ -16,6 +16,7 @@ from app.models.lead import CustomerLead, LeadStatus
 from app.models.user import User, UserRole
 from app.schemas.admin import (
     AdminBuildingResponse,
+    AdminUserResponse,
     AuditLogResponse,
     ImpersonationResponse,
     PasswordResetResponse,
@@ -113,11 +114,34 @@ def list_buildings(_: User = Depends(require_super_admin), db: Session = Depends
     buildings = db.scalars(
         select(Building).options(selectinload(Building.users)).order_by(Building.created_at.desc())
     ).all()
-    return [
-        AdminBuildingResponse.model_validate(building)
-        for building in buildings
-        if any(user.role != UserRole.SUPER_ADMIN.value for user in building.users)
-    ]
+    leads = db.scalars(select(CustomerLead).where(CustomerLead.building_id.is_not(None))).all()
+    lead_map = {lead.building_id: lead for lead in leads}
+
+    result = []
+    for building in buildings:
+        if any(user.role != UserRole.SUPER_ADMIN.value for user in building.users):
+            lead = lead_map.get(building.id)
+            result.append(
+                AdminBuildingResponse(
+                    id=building.id,
+                    name=building.name,
+                    code=building.code,
+                    phone=lead.phone if lead else None,
+                    facility_type=lead.facility_type if lead else None,
+                    expected_scale=lead.expected_scale if lead else None,
+                    created_at=building.created_at,
+                    users=[
+                        AdminUserResponse(
+                            id=u.id,
+                            name=u.name,
+                            email=u.email,
+                            role=u.role,
+                        )
+                        for u in building.users
+                    ],
+                )
+            )
+    return result
 
 
 @router.post("/buildings/{building_id}/impersonate", response_model=ImpersonationResponse)
@@ -179,15 +203,18 @@ def reset_password(
 
 @router.get("/audit-logs", response_model=list[AuditLogResponse])
 def list_audit_logs(
-    limit: int = 100,
+    limit: int = 50,
+    offset: int = 0,
     _: User = Depends(require_super_admin),
     db: Session = Depends(get_db),
 ):
     safe_limit = min(max(limit, 1), 500)
+    safe_offset = max(offset, 0)
     logs = db.scalars(
         select(AuditLog)
         .options(joinedload(AuditLog.admin), joinedload(AuditLog.building))
         .order_by(AuditLog.created_at.desc())
+        .offset(safe_offset)
         .limit(safe_limit)
     ).all()
     return [

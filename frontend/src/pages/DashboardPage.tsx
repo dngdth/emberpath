@@ -290,6 +290,7 @@ export function DashboardPage() {
         isDark={isDark}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        onOpen={() => setSidebarOpen(true)}
       />
 
       {/* 2. Main content area (aligned right of sidebar) */}

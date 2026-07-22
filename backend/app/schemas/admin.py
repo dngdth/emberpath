@@ -18,6 +18,9 @@ class AdminBuildingResponse(BaseModel):
     id: int
     name: str
     code: str
+    phone: str | None = None
+    facility_type: str | None = None
+    expected_scale: str | None = None
     created_at: datetime
     users: list[AdminUserResponse]
 

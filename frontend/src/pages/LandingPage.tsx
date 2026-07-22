@@ -7,6 +7,7 @@ import { HowItWorks } from '../components/Landing/HowItWorks';
 import { Footer } from '../components/Landing/Footer';
 import { ConsultationSection } from '../components/Landing/ConsultationSection';
 import { ConsultationModal } from '../components/Landing/ConsultationModal';
+import { FloatingContactButton } from '../components/Landing/FloatingContactButton';
 import { useThemeStore } from '../store/themeStore';
 
 export function LandingPage() {
@@ -63,6 +64,12 @@ export function LandingPage() {
         isOpen={isConsultationOpen} 
         onClose={() => setIsConsultationOpen(false)} 
         isDark={isDark} 
+      />
+
+      {/* Floating Contact Widget */}
+      <FloatingContactButton
+        isDark={isDark}
+        onOpenConsultation={handleOpenConsultation}
       />
     </div>
   );

@@ -123,6 +123,42 @@ def _seed_gradient_demo(db: Session) -> None:
     db.add_all(floors)
     db.flush()
 
+    # ---------------------------------------------------------------
+    # Sensor devices: cùng device_id với ESP32 thực (Building A)
+    # Backend ingest sẽ cập nhật cả 2 buildings khi ESP32 gửi data
+    # Mapping vật lý: Master→f1-entry, Sat1→f1-junction, Sat2→f1-safe, Sat3→f1-danger
+    # ---------------------------------------------------------------
+    gd_floor1 = floors[0]
+    gd_device_specs = [
+        (gd_floor1.id, "Node sảnh (Master)",   "temp-master", "Temp Master",   "temp", 50,  26.0, "C"),
+        (gd_floor1.id, "Node sảnh (Master)",   "mq2-master",  "MQ2 Master",    "mq2",  600, 0.0,  "raw"),
+        (gd_floor1.id, "Node phân nhánh (Sat1)","temp-sat-1",  "Temp Vệ tinh 1","temp", 50,  26.0, "C"),
+        (gd_floor1.id, "Node phân nhánh (Sat1)","mq2-sat-1",   "MQ2 Vệ tinh 1", "mq2",  600, 0.0,  "raw"),
+        (gd_floor1.id, "Nhánh an toàn (Sat2)",  "temp-sat-2",  "Temp Vệ tinh 2","temp", 50,  26.0, "C"),
+        (gd_floor1.id, "Nhánh an toàn (Sat2)",  "mq2-sat-2",   "MQ2 Vệ tinh 2", "mq2",  600, 0.0,  "raw"),
+        (gd_floor1.id, "Nhánh cháy (Sat3)",     "temp-sat-3",  "Temp Vệ tinh 3","temp", 50,  26.0, "C"),
+        (gd_floor1.id, "Nhánh cháy (Sat3)",     "mq2-sat-3",   "MQ2 Vệ tinh 3", "mq2",  600, 0.0,  "raw"),
+    ]
+    now = datetime.utcnow()
+    for floor_id, room_name, device_id, name, sensor_type, threshold, latest_value, unit in gd_device_specs:
+        status = evaluate_sensor_status(sensor_type, latest_value, threshold)
+        gd_dev = SensorDevice(
+            building_id=building.id,
+            floor_id=floor_id,
+            room_name=room_name,
+            device_id=device_id,
+            name=name,
+            sensor_type=sensor_type,
+            threshold=threshold,
+            latest_value=latest_value,
+            latest_status=status,
+            unit=unit,
+            last_seen_at=now,
+        )
+        db.add(gd_dev)
+        db.flush()
+        db.add(SensorReading(device_id=gd_dev.id, value=latest_value, status=status, unit=unit, created_at=now))
+
     def base_objects(index: int) -> list[dict]:
         return [
             make_obj("floor-base", "floor_base", 35, 45, width=1030, height=550, name=f"Mặt bằng tầng {index}", color="#172033", locked=True),
@@ -131,28 +167,30 @@ def _seed_gradient_demo(db: Session) -> None:
             make_obj("wall-bottom", "wall", 55, 545, width=990, height=8, name="Tường", color="#475569"),
         ]
 
-    # Tầng 1 contains the exits. The red branch is deliberately blocked so
-    # the gradient chooses the safe upper branch.
-    f1_entry = make_obj("f1-entry", "sensor", 120, 310, width=54, height=54, name="Node sảnh tầng 1")
-    f1_junction = make_obj("f1-junction", "sensor", 350, 310, width=54, height=54, name="Node phân nhánh")
-    f1_safe = make_obj("f1-safe", "sensor", 590, 175, width=54, height=54, name="Nhánh an toàn")
-    f1_danger = make_obj("f1-danger", "sensor", 590, 430, width=54, height=54, name="Nhánh có cháy", nodeStatus="danger")
-    f1_stairs = make_obj("f1-stairs-a", "stairs", 850, 310, width=92, height=76, name="Cầu thang A")
-    f1_exit = make_obj("f1-exit", "exit", 900, 155, width=105, height=48, name="LỐI THOÁT")
+    # Tầng 1: ID node = device_id ESP32 → node tự đổi màu đỏ/xanh theo realtime
+    # Master ở sảnh vào, Sat1 ở ngã tư, Sat2 nhánh an toàn, Sat3 nhánh cháy
+    f1_entry   = make_obj("temp-master", "sensor", 120, 310, width=54, height=54, name="Node sảnh tầng 1")
+    f1_junction= make_obj("temp-sat-1",  "sensor", 350, 310, width=54, height=54, name="Node phân nhánh")
+    f1_safe    = make_obj("temp-sat-2",  "sensor", 590, 175, width=54, height=54, name="Nhánh an toàn")
+    f1_danger  = make_obj("temp-sat-3",  "sensor", 590, 430, width=54, height=54, name="Nhánh có cháy")
+    f1_stairs  = make_obj("f1-stairs-a", "stairs", 850, 310, width=92, height=76, name="Cầu thang A")
+    f1_exit    = make_obj("f1-exit",     "exit",   900, 155, width=105, height=48, name="LỐI THOÁT")
+
     floor1_objects = [
-        *base_objects(1), f1_entry, f1_junction, f1_safe, f1_danger, f1_stairs, f1_exit,
-        make_wire("f1-wire-entry-junction", f1_entry, f1_junction),
-        make_wire("f1-wire-stairs-junction", f1_stairs, f1_junction),
-        make_wire("f1-wire-junction-safe", f1_junction, f1_safe),
-        make_wire("f1-wire-safe-exit", f1_safe, f1_exit),
-        make_wire("f1-wire-junction-danger", f1_junction, f1_danger),
-        make_wire("f1-wire-danger-exit", f1_danger, f1_exit),
+        *base_objects(1),
+        f1_entry, f1_junction, f1_safe, f1_danger, f1_stairs, f1_exit,
+        make_wire("f1-wire-entry-junction",   f1_entry,   f1_junction),
+        make_wire("f1-wire-stairs-junction",  f1_stairs,  f1_junction),
+        make_wire("f1-wire-junction-safe",    f1_junction, f1_safe),
+        make_wire("f1-wire-safe-exit",        f1_safe,    f1_exit),
+        make_wire("f1-wire-junction-danger",  f1_junction, f1_danger),
+        make_wire("f1-wire-danger-exit",      f1_danger,  f1_exit),
     ]
 
     all_objects = [floor1_objects]
     for index in range(2, 5):
         previous_floor = floors[index - 2]
-        start = make_obj(f"f{index}-start", "sensor", 115, 300, width=54, height=54, name=f"Node xuất phát T{index}", nodeStatus="safe")
+        start = make_obj(f"f{index}-start", "sensor", 115, 300, width=54, height=54, name=f"Node xuất phát T{index}")
         upper = make_obj(f"f{index}-upper", "sensor", 390, 175, width=54, height=54, name="Node hành lang Bắc")
         lower = make_obj(f"f{index}-lower", "sensor", 390, 420, width=54, height=54, name="Node hành lang Nam")
         merge = make_obj(f"f{index}-merge", "sensor", 650, 300, width=54, height=54, name="Node hợp tuyến")

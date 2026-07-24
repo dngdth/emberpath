@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db.base import Base
-from app.models import Building, Floor, FloorPlan
+from app.models import Building, Floor, FloorPlan, SensorDevice
 from app.services.gradient_field import GradientEdge, GradientFieldRouter
 from app.services.pathfinding import find_safe_path
 
@@ -193,6 +193,69 @@ class FloorPlanTopologyTests(unittest.TestCase):
         self.assertEqual(segment["status"], "danger")
         self.assertEqual((segment["from_node_id"], segment["to_node_id"]), ("fire", "safe"))
         self.assertTrue(segment["reverse"])
+
+    def test_mq2_channel_marks_paired_temperature_route_node_danger(self):
+        self.save_objects([
+            self.node("temp-sat-3", "sensor", 0),
+            self.node("exit", "exit", 200),
+            self.wire("wire", 18, 240, from_id="temp-sat-3", to_id="exit"),
+        ])
+        self.db.add(SensorDevice(
+            building_id=self.building_id,
+            floor_id=self.floor_id,
+            room_name="Satellite 3",
+            device_id="mq2-sat-3",
+            name="MQ2 Satellite 3",
+            sensor_type="mq2",
+            threshold=600,
+            latest_value=900,
+            latest_status="danger",
+            unit="raw",
+        ))
+        self.db.commit()
+
+        result = find_safe_path(
+            self.db,
+            self.building_id,
+            self.floor_id,
+            "mq2-sat-3",
+        )
+
+        self.assertEqual(
+            [node["node_id"] for node in result["hazard_nodes"]],
+            ["temp-sat-3"],
+        )
+        self.assertEqual(result["segments"][0]["status"], "danger")
+
+    def test_live_safe_status_overrides_stale_static_danger(self):
+        self.save_objects([
+            self.node("temp-sat-2", "sensor", 0, danger=True),
+            self.node("exit", "exit", 200),
+            self.wire("wire", 18, 240, from_id="temp-sat-2", to_id="exit"),
+        ])
+        self.db.add(SensorDevice(
+            building_id=self.building_id,
+            floor_id=self.floor_id,
+            room_name="Satellite 2",
+            device_id="temp-sat-2",
+            name="Temperature Satellite 2",
+            sensor_type="temp",
+            threshold=50,
+            latest_value=26,
+            latest_status="safe",
+            unit="C",
+        ))
+        self.db.commit()
+
+        result = find_safe_path(
+            self.db,
+            self.building_id,
+            self.floor_id,
+            "temp-sat-2",
+        )
+
+        self.assertEqual(result["hazard_nodes"], [])
+        self.assertEqual(result["segments"][0]["status"], "safe")
 
     def test_stairs_link_guidance_across_floors(self):
         second_floor = Floor(building_id=self.building_id, name="Tầng 2", order_index=2)

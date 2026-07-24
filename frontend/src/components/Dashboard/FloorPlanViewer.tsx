@@ -5,6 +5,7 @@ import { ZoomIn, ZoomOut, Maximize, RefreshCw, AlertTriangle, ShieldCheck, Lock,
 import { FloorPlanObject, FloorItem, SafePathResult } from '../../types/editor';
 import { SensorDevice } from '../../types/sensor';
 import { getDefaultSize, isPointInPolygon } from '../../utils/geometryHelpers';
+import { sensorDeviceMatchesNode } from '../../utils/sensorIdentity';
 import { StairsSymbol } from '../MapEditor/StairsSymbol';
 import { DangerSensorsPanel } from './DangerSensorsPanel';
 
@@ -378,7 +379,9 @@ export function FloorPlanViewer({
     
     objects.forEach((obj) => {
       if (obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp') {
-        const hasDanger = Array.from(dangerDeviceIds).some(did => did === obj.id || did.endsWith(obj.id));
+        const hasDanger = Array.from(dangerDeviceIds).some((deviceId) =>
+          sensorDeviceMatchesNode(deviceId, obj.id)
+        );
         if (hasDanger) {
           dangerPositions.push({ x: obj.x, y: obj.y });
         }
@@ -579,9 +582,19 @@ export function FloorPlanViewer({
     }
 
     if (obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp') {
-      const isDanger = Array.from(dangerDeviceIds).some(did => did === obj.id || did.endsWith(obj.id)) || obj.nodeStatus === 'danger';
-      const isWarning = Array.from(warningDeviceIds).some(did => did === obj.id || did.endsWith(obj.id));
-      const matchKey = Array.from(sensorValues.keys()).find(k => k === obj.id || k.endsWith(obj.id));
+      const matchingDeviceIds = Array.from(sensorValues.keys()).filter((deviceId) =>
+        sensorDeviceMatchesNode(deviceId, obj.id)
+      );
+      const hasLiveSensor = matchingDeviceIds.length > 0;
+      const isDanger = hasLiveSensor
+        ? matchingDeviceIds.some((deviceId) => dangerDeviceIds.has(deviceId))
+        : obj.nodeStatus === 'danger';
+      const isWarning = Array.from(warningDeviceIds).some((deviceId) =>
+        sensorDeviceMatchesNode(deviceId, obj.id)
+      );
+      const matchKey = sensorValues.has(obj.id)
+        ? obj.id
+        : matchingDeviceIds[0];
       const reading = matchKey ? sensorValues.get(matchKey) : undefined;
 
       return (

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Iterable
@@ -27,6 +28,7 @@ DEFAULT_SIZES: dict[str, tuple[float, float]] = {
     "exit": (80.0, 36.0),
 }
 WIRE_ENDPOINT_TOLERANCE = 32.0
+PHYSICAL_SENSOR_NODE_PATTERN = re.compile(r"^(?:master|sat-\d+)$")
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,24 @@ class RoutingLink:
     kind: str
     floor_id: int | None
     wire_id: str | None
+
+
+def _physical_sensor_node_id(identifier: str) -> str:
+    """Map the temperature and MQ2 channels of one ESP32 to one route node."""
+
+    for prefix in ("temp-", "mq2-"):
+        if identifier.startswith(prefix):
+            node_id = identifier.removeprefix(prefix)
+            if PHYSICAL_SENSOR_NODE_PATTERN.fullmatch(node_id):
+                return node_id
+    return identifier
+
+
+def _sensor_device_matches_node(device_id: str, node_id: str) -> bool:
+    return (
+        device_id == node_id
+        or _physical_sensor_node_id(device_id) == _physical_sensor_node_id(node_id)
+    )
 
 
 def _object_size(obj: dict[str, Any]) -> tuple[float, float]:
@@ -220,19 +240,24 @@ def _load_topology(
             )
         )
 
-    danger_devices = set(
-        db.scalars(
-            select(SensorDevice.device_id).where(
-                SensorDevice.building_id == building_id,
-                SensorDevice.latest_status == "danger",
-            )
-        ).all()
-    )
-    hazards = {
-        key
-        for key, node in nodes.items()
-        if key[1] in danger_devices or node.object.get("nodeStatus") == "danger"
-    }
+    sensor_devices = db.scalars(
+        select(SensorDevice).where(SensorDevice.building_id == building_id)
+    ).all()
+    hazards: set[NodeKey] = set()
+    sensor_node_types = {"sensor", "mq2", "temp"}
+    for key, node in nodes.items():
+        matching_devices = [
+            device
+            for device in sensor_devices
+            if _sensor_device_matches_node(device.device_id, key[1])
+        ]
+        if matching_devices and node.object.get("type") in sensor_node_types:
+            # Realtime readings are authoritative for registered sensor nodes.
+            if any(device.latest_status == "danger" for device in matching_devices):
+                hazards.add(key)
+        elif node.object.get("nodeStatus") == "danger":
+            # Keep manual/static danger support for objects without a live device.
+            hazards.add(key)
     return nodes, edges, hazards
 
 
@@ -473,7 +498,15 @@ def find_safe_path(
     nodes, edges, hazards = _load_topology(db, building_id)
     start: NodeKey = (floor_id, start_node_id)
     if start not in nodes:
-        raise ValueError("Điểm bắt đầu không tồn tại trên tầng đã chọn")
+        matching_starts = [
+            key
+            for key in nodes
+            if key[0] == floor_id and _sensor_device_matches_node(start_node_id, key[1])
+        ]
+        if len(matching_starts) == 1:
+            start = matching_starts[0]
+        else:
+            raise ValueError("Điểm bắt đầu không tồn tại trên tầng đã chọn")
 
     if end_node_id:
         destination: NodeKey = (floor_id, end_node_id)

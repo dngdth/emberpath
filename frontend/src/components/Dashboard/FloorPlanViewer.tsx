@@ -21,6 +21,7 @@ import { LedWireShape } from '../MapEditor/Shapes/LedWireShape';
 import { LedShape } from '../MapEditor/Shapes/LedShape';
 import { ConnectorShape } from '../MapEditor/Shapes/ConnectorShape';
 import { LabelShape } from '../MapEditor/Shapes/LabelShape';
+import { ImageShape } from '../MapEditor/Shapes/ImageShape';
 
 interface Props {
   floorId: number | null;
@@ -446,27 +447,7 @@ export function FloorPlanViewer({
 
 
 
-  // Layering helper: sorted by visual hierarchy (floor_base at bottom, led_wire behind sensors, connector at top)
-  const sortedObjects = useMemo(() => {
-    const order = [
-      'floor_base',
-      'led_wire',
-      'wall',
-      'stairs',
-      'elevator',
-      'exit',
-      'sensor',
-      'label',
-      'connector'
-    ];
-    return [...objects].sort((a, b) => {
-      const idxA = order.indexOf(a.type);
-      const idxB = order.indexOf(b.type);
-      const valA = idxA !== -1 ? idxA : 99;
-      const valB = idxB !== -1 ? idxB : 99;
-      return valA - valB;
-    });
-  }, [objects]);
+  // Render objects on Konva layer in array order (preserving user z-index choices)
 
   // Render objects on Konva layer
   const renderObject = (obj: FloorPlanObject) => {
@@ -506,6 +487,17 @@ export function FloorPlanViewer({
         ? () => handleTouchMove()
         : undefined,
     };
+
+    if (obj.type === 'image') {
+      return (
+        <ImageShape
+          object={obj}
+          selected={false}
+          isDark={isDark}
+          commonProps={commonProps}
+        />
+      );
+    }
 
     if (obj.type === 'floor_base') {
       return (
@@ -794,7 +786,7 @@ export function FloorPlanViewer({
             scaleY={scale}
           >
             {/* Render all structural objects (Layered bases first) */}
-            {sortedObjects.map((object) => (
+            {objects.map((object) => (
               <Fragment key={object.id}>{renderObject(object)}</Fragment>
             ))}
 

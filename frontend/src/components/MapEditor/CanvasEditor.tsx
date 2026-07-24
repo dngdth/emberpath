@@ -24,6 +24,7 @@ import { ElevatorShape } from './Shapes/ElevatorShape';
 import { SensorShape } from './Shapes/SensorShape';
 import { ConnectorShape } from './Shapes/ConnectorShape';
 import { LabelShape } from './Shapes/LabelShape';
+import { ImageShape } from './Shapes/ImageShape';
 import { BelowObjectOutline } from './Shapes/BelowObjectOutline';
 import { PolygonVertexHandles } from './Shapes/PolygonVertexHandles';
 import { SheetEdgeResizers } from './Shapes/SheetEdgeResizers';
@@ -462,9 +463,6 @@ function CanvasEditorComponent(props: Props) {
     e.preventDefault();
     if (!props.editMode) return;
 
-    const type = e.dataTransfer.getData('text/plain') as FloorPlanObject['type'];
-    if (!type || (type as string) === 'eraser') return;
-
     const stage = stageRef.current;
     if (!stage) return;
 
@@ -478,34 +476,59 @@ function CanvasEditorComponent(props: Props) {
     const stageX = (x - props.position.x) / props.scale;
     const stageY = (y - props.position.y) / props.scale;
 
+    // Handle dropped image file
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const dataUrl = event.target?.result as string;
+          if (!dataUrl) return;
+          const img = new Image();
+          img.onload = () => {
+            let width = img.naturalWidth || 600;
+            let height = img.naturalHeight || 400;
+            const maxDim = 1000;
+            if (width > maxDim || height > maxDim) {
+              const ratio = Math.min(maxDim / width, maxDim / height);
+              width = Math.round(width * ratio);
+              height = Math.round(height * ratio);
+            }
+
+            const newImgObj: FloorPlanObject = {
+              id: `image-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+              type: 'image',
+              name: file.name ? file.name.replace(/\.[^/.]+$/, '') : 'Hình ảnh sơ đồ',
+              x: stageX,
+              y: stageY,
+              width,
+              height,
+              rotation: 0,
+              src: dataUrl,
+              opacity: 0.5,
+              visible: true,
+              locked: false,
+            };
+            props.onAddCustomObject?.(newImgObj);
+            props.onSelect(newImgObj.id, false);
+          };
+          img.src = dataUrl;
+        };
+        reader.readAsDataURL(file);
+        return;
+      }
+    }
+
+    const type = e.dataTransfer.getData('text/plain') as FloorPlanObject['type'];
+    if (!type || (type as string) === 'eraser') return;
+
     props.onAddObject(type, stageX, stageY);
   }
 
-  // Layering helper: sorted by visual hierarchy (floor_base at bottom, led_wire behind sensors, connector at top)
-  const sortedObjects = useMemo(() => {
-    const order = [
-      'floor_base',
-      'led_wire',
-      'wall',
-      'stairs',
-      'elevator',
-      'exit',
-      'sensor',
-      'label',
-      'connector',
-    ];
-    return [...props.objects].sort((a, b) => {
-      const idxA = order.indexOf(a.type);
-      const idxB = order.indexOf(b.type);
-      const valA = idxA !== -1 ? idxA : 99;
-      const valB = idxB !== -1 ? idxB : 99;
-      return valA - valB;
-    });
-  }, [props.objects]);
-
+  // Use array order directly so user-triggered bringToFront and sendToBack reordering works
   const visibleObjects = useMemo(() => {
-    return sortedObjects.filter((o) => !erasedIds.has(o.id));
-  }, [sortedObjects, erasedIds]);
+    return props.objects.filter((o) => !erasedIds.has(o.id));
+  }, [props.objects, erasedIds]);
 
   // Memoized render functions delegating to sub-components
   const renderBelowOutline = useCallback((object: FloorPlanObject) => {
@@ -536,7 +559,11 @@ function CanvasEditorComponent(props: Props) {
         if (isSpacePressed || event.evt.button === 1) return;
         event.cancelBubble = true;
 
-        const isPlacementTool = props.activeTool !== 'select' && props.activeTool !== 'eraser' && !props.activeTool.endsWith('-pen');
+        if (props.activeTool.endsWith('-pen')) {
+          return;
+        }
+
+        const isPlacementTool = props.activeTool !== 'select' && props.activeTool !== 'eraser';
         if (isPlacementTool) {
           const stage = event.target.getStage();
           const pointer = stage?.getPointerPosition();
@@ -549,15 +576,15 @@ function CanvasEditorComponent(props: Props) {
         }
 
         props.onSelect(object.id, event.evt.shiftKey);
-        const isPenTool = props.activeTool === 'floor_base-pen';
-        if (isPenTool) {
-          props.onContextAction('select', '');
-        }
       },
       onTap: (event: Konva.KonvaEventObject<Event>) => {
         event.cancelBubble = true;
 
-        const isPlacementTool = props.activeTool !== 'select' && props.activeTool !== 'eraser' && !props.activeTool.endsWith('-pen');
+        if (props.activeTool.endsWith('-pen')) {
+          return;
+        }
+
+        const isPlacementTool = props.activeTool !== 'select' && props.activeTool !== 'eraser';
         if (isPlacementTool) {
           const stage = event.target.getStage();
           const pointer = stage?.getPointerPosition();
@@ -570,10 +597,6 @@ function CanvasEditorComponent(props: Props) {
         }
 
         props.onSelect(object.id, false);
-        const isPenTool = props.activeTool === 'floor_base-pen';
-        if (isPenTool) {
-          props.onContextAction('select', '');
-        }
       },
       onDblClick: (e: any) => {
         if (!props.editMode) return;
@@ -686,6 +709,38 @@ function CanvasEditorComponent(props: Props) {
         pendingGuideTargetRef.current = null;
         setGuides([]);
       },
+      onTransform: (event: Konva.KonvaEventObject<Event>) => {
+        if (object.type === 'label') {
+          const node = event.target;
+          if (node instanceof Konva.Container) {
+            const scaleX = node.scaleX();
+            const scaleY = node.scaleY();
+            
+            node.scaleX(1);
+            node.scaleY(1);
+
+            const activeAnchor = transformerRef.current?.getActiveAnchor();
+            const isDiagonal = activeAnchor && ['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(activeAnchor);
+
+            const textNode = node.findOne('Text') as Konva.Text | undefined;
+            const newWidth = Math.max(16, node.width() * scaleX);
+            const newHeight = Math.max(16, node.height() * scaleY);
+            
+            node.width(newWidth);
+            node.height(newHeight);
+
+            if (textNode) {
+              textNode.width(newWidth);
+              if (isDiagonal) {
+                const currentFontSize = textNode.fontSize() || object.fontSize || 22;
+                const newFontSize = Math.max(8, Math.round(currentFontSize * scaleY));
+                textNode.fontSize(newFontSize);
+              }
+            }
+            node.getStage()?.batchDraw();
+          }
+        }
+      },
       onTransformEnd: (event: Konva.KonvaEventObject<Event>) => {
         const node = event.target;
         const scaleX = node.scaleX();
@@ -693,13 +748,39 @@ function CanvasEditorComponent(props: Props) {
         node.scaleX(1);
         node.scaleY(1);
 
-        props.onUpdateObject(object.id, {
-          x: node.x(),
-          y: node.y(),
-          width: Math.max(16, width * scaleX),
-          height: Math.max(16, height * scaleY),
-          rotation: node.rotation(),
-        });
+        if (object.type === 'label') {
+          const activeAnchor = transformerRef.current?.getActiveAnchor();
+          const isDiagonal = activeAnchor && ['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(activeAnchor);
+
+          if (isDiagonal) {
+            const currentFontSize = object.fontSize || 22;
+            const newFontSize = Math.max(8, Math.round(currentFontSize * scaleY));
+            props.onUpdateObject(object.id, {
+              x: node.x(),
+              y: node.y(),
+              width: Math.max(16, width * scaleX),
+              height: Math.max(16, height * scaleY),
+              fontSize: newFontSize,
+              rotation: node.rotation(),
+            });
+          } else {
+            props.onUpdateObject(object.id, {
+              x: node.x(),
+              y: node.y(),
+              width: Math.max(16, width * scaleX),
+              height: Math.max(16, height * scaleY),
+              rotation: node.rotation(),
+            });
+          }
+        } else {
+          props.onUpdateObject(object.id, {
+            x: node.x(),
+            y: node.y(),
+            width: Math.max(16, width * scaleX),
+            height: Math.max(16, height * scaleY),
+            rotation: node.rotation(),
+          });
+        }
       },
     };
 
@@ -777,6 +858,16 @@ function CanvasEditorComponent(props: Props) {
       case 'wall':
         return (
           <WallShape
+            key={object.id}
+            object={object}
+            selected={selected}
+            isDark={isDark}
+            commonProps={commonProps}
+          />
+        );
+      case 'image':
+        return (
+          <ImageShape
             key={object.id}
             object={object}
             selected={selected}

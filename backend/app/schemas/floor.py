@@ -21,6 +21,8 @@ class PlanObjectIn(BaseModel):
     shapeType: str | None = None
     target_floor_id: int | None = None
     points: list[float] | None = None
+    src: str | None = None
+    opacity: float | None = None
 
 class FloorResponse(BaseModel):
     id: int

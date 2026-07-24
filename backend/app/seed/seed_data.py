@@ -62,14 +62,14 @@ def make_wire(object_id: str, left: dict, right: dict, *via: tuple[float, float]
     )
 
 
-def _add_plan(db: Session, building_id: int, floor: Floor, objects: list[dict]) -> None:
+def _add_plan(db: Session, building_id: int, floor: Floor, objects: list[dict], canvas_width: float = 1100, canvas_height: float = 650, version: int = 1) -> None:
     plan = FloorPlan(
         building_id=building_id,
         floor_id=floor.id,
         canvas_json=json.dumps(objects),
-        canvas_width=1100,
-        canvas_height=650,
-        version=1,
+        canvas_width=canvas_width,
+        canvas_height=canvas_height,
+        version=version,
     )
     db.add(plan)
     db.flush()
@@ -239,6 +239,52 @@ def _seed_gradient_demo(db: Session) -> None:
         seed_history(db)
 
 
+def _seed_gradient_new(db: Session) -> None:
+    if db.scalar(select(Building).where(Building.code == "GRADIENT-NEW")):
+        return
+
+    building = Building(name="Gradient New Tower", code="GRADIENT-NEW")
+    db.add(building)
+    db.flush()
+    db.add(
+        User(
+            name="Gradient New Admin",
+            email="gradient_new@emberpath.demo",
+            password_hash=get_password_hash("123456"),
+            role=UserRole.ADMIN_BUILDING.value,
+            building_id=building.id,
+        )
+    )
+
+    import os
+    current_dir = os.path.dirname(__file__)
+    json_path = os.path.join(current_dir, "gradient_demo.json")
+    if os.path.exists(json_path):
+        with open(json_path, "r", encoding="utf-8") as f:
+            floors_data = json.load(f)
+        
+        for f_data in floors_data:
+            floor = Floor(
+                building_id=building.id,
+                name=f_data["name"],
+                order_index=f_data["order_index"]
+            )
+            db.add(floor)
+            db.flush()
+            
+            for p_data in f_data.get("plans", []):
+                _add_plan(
+                    db,
+                    building.id,
+                    floor,
+                    p_data["canvas_json"],
+                    canvas_width=p_data.get("canvas_width", 1100),
+                    canvas_height=p_data.get("canvas_height", 650),
+                    version=p_data.get("version", 1)
+                )
+    db.commit()
+
+
 def _ensure_super_admin(db: Session) -> None:
     if db.scalar(select(User).where(User.role == UserRole.SUPER_ADMIN.value)):
         return
@@ -261,6 +307,7 @@ def seed_database(db: Session) -> None:
     if db.scalar(select(Building).limit(1)):
         _ensure_super_admin(db)
         _seed_gradient_demo(db)
+        _seed_gradient_new(db)
         return
 
     building_a = Building(name="Building A", code="B01")
@@ -432,3 +479,4 @@ def seed_database(db: Session) -> None:
     db.commit()
     _ensure_super_admin(db)
     _seed_gradient_demo(db)
+    _seed_gradient_new(db)

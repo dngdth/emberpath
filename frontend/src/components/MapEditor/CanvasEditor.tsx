@@ -4,6 +4,7 @@ import { Circle, Group, Layer, Line, Rect, Stage, Text, Transformer } from 'reac
 import { FloorPlanObject, SafePathResult } from '../../types/editor';
 import { SensorDevice } from '../../types/sensor';
 import { getDefaultSize, isResizable } from '../../utils/geometryHelpers';
+import { sensorDeviceMatchesNode } from '../../utils/sensorIdentity';
 import { snapPosition, getGuideLines } from '../../utils/snapHelpers';
 import { useThemeStore } from '../../store/themeStore';
 import { usePenDrawing } from '../../hooks/usePenDrawing';
@@ -539,10 +540,18 @@ function CanvasEditorComponent(props: Props) {
     if (object.visible === false || object.id === editingLabelId) return null;
 
     const selected = selectedIdSet.has(object.id);
+    const matchingDeviceIds = Array.from(sensorValues.keys()).filter((deviceId) =>
+      sensorDeviceMatchesNode(deviceId, object.id)
+    );
+    const hasLiveSensor = matchingDeviceIds.length > 0;
     const isSensorDanger = ['sensor', 'mq2', 'temp'].includes(object.type)
-      && (dangerDeviceIds.has(object.id) || object.nodeStatus === 'danger');
-    const isSensorWarning = object.type === 'sensor' && warningDeviceIds.has(object.id);
-    const sensorReading = sensorValues.get(object.id);
+      && (hasLiveSensor
+        ? matchingDeviceIds.some((deviceId) => dangerDeviceIds.has(deviceId))
+        : object.nodeStatus === 'danger');
+    const isSensorWarning = object.type === 'sensor'
+      && matchingDeviceIds.some((deviceId) => warningDeviceIds.has(deviceId));
+    const sensorReadingKey = sensorValues.has(object.id) ? object.id : matchingDeviceIds[0];
+    const sensorReading = sensorReadingKey ? sensorValues.get(sensorReadingKey) : undefined;
 
     const width = object.width || getDefaultSize(object.type).width;
     const height = object.height || getDefaultSize(object.type).height;

@@ -44,6 +44,15 @@ export function DemoAccounts({ onSelect, isDark, disabled }: DemoAccountsProps) 
       iconColor: 'text-emerald-500',
       bgColor: 'hover:border-emerald-500/50 hover:bg-emerald-500/5',
     },
+    {
+      role: 'Demo Gradient Sơ đồ mới',
+      email: 'gradient_new@emberpath.demo',
+      pass: '123456',
+      desc: 'Thử tuyến LED với sơ đồ mới được thiết kế.',
+      icon: Route,
+      iconColor: 'text-cyan-500',
+      bgColor: 'hover:border-cyan-500/50 hover:bg-cyan-500/5',
+    },
   ];
 
   return (

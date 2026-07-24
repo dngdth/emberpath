@@ -19,7 +19,7 @@ from app.db.schema import ensure_sqlite_columns
 from app.db.session import SessionLocal, engine
 from app.models.user import User, UserRole
 from app.models.audit_log import AuditLog
-from app.seed.seed_data import seed_database
+from app.seed.seed_data import ensure_extended_satellite_devices, seed_database
 # from app.services.simulator import simulator_loop  # Simulator da tat
 from app.services.websocket_manager import ws_manager
 
@@ -32,6 +32,8 @@ async def lifespan(app: FastAPI):
     try:
         if settings.seed_demo_data:
             seed_database(db)
+        # Keep existing databases in sync without deleting users, plans, or history.
+        ensure_extended_satellite_devices(db)
     finally:
         db.close()
 

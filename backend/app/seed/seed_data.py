@@ -116,6 +116,88 @@ def _seed_gradient_demo(db: Session) -> None:
         )
     )
 
+    floors = [
+        Floor(building_id=building.id, name=f"Tầng {index}", order_index=index)
+        for index in range(1, 5)
+    ]
+    db.add_all(floors)
+    db.flush()
+
+    def base_objects(index: int) -> list[dict]:
+        return [
+            make_obj("floor-base", "floor_base", 35, 45, width=1030, height=550, name=f"Mặt bằng tầng {index}", color="#172033", locked=True),
+            make_obj("floor-label", "label", 65, 68, width=360, height=40, name=f"GRADIENT FIELD • TẦNG {index}", fontSize=24, color="#e2e8f0"),
+            make_obj("wall-top", "wall", 55, 125, width=990, height=8, name="Tường", color="#475569"),
+            make_obj("wall-bottom", "wall", 55, 545, width=990, height=8, name="Tường", color="#475569"),
+        ]
+
+    # Tầng 1 contains the exits. The red branch is deliberately blocked so
+    # the gradient chooses the safe upper branch.
+    f1_entry = make_obj("f1-entry", "sensor", 120, 310, width=54, height=54, name="Node sảnh tầng 1")
+    f1_junction = make_obj("f1-junction", "sensor", 350, 310, width=54, height=54, name="Node phân nhánh")
+    f1_safe = make_obj("f1-safe", "sensor", 590, 175, width=54, height=54, name="Nhánh an toàn")
+    f1_danger = make_obj("f1-danger", "sensor", 590, 430, width=54, height=54, name="Nhánh có cháy", nodeStatus="danger")
+    f1_stairs = make_obj("f1-stairs-a", "stairs", 850, 310, width=92, height=76, name="Cầu thang A")
+    f1_exit = make_obj("f1-exit", "exit", 900, 155, width=105, height=48, name="LỐI THOÁT")
+    floor1_objects = [
+        *base_objects(1), f1_entry, f1_junction, f1_safe, f1_danger, f1_stairs, f1_exit,
+        make_wire("f1-wire-entry-junction", f1_entry, f1_junction),
+        make_wire("f1-wire-stairs-junction", f1_stairs, f1_junction),
+        make_wire("f1-wire-junction-safe", f1_junction, f1_safe),
+        make_wire("f1-wire-safe-exit", f1_safe, f1_exit),
+        make_wire("f1-wire-junction-danger", f1_junction, f1_danger),
+        make_wire("f1-wire-danger-exit", f1_danger, f1_exit),
+    ]
+
+    all_objects = [floor1_objects]
+    for index in range(2, 5):
+        previous_floor = floors[index - 2]
+        start = make_obj(f"f{index}-start", "sensor", 115, 300, width=54, height=54, name=f"Node xuất phát T{index}", nodeStatus="safe")
+        upper = make_obj(f"f{index}-upper", "sensor", 390, 175, width=54, height=54, name="Node hành lang Bắc")
+        lower = make_obj(f"f{index}-lower", "sensor", 390, 420, width=54, height=54, name="Node hành lang Nam")
+        merge = make_obj(f"f{index}-merge", "sensor", 650, 300, width=54, height=54, name="Node hợp tuyến")
+        stairs = make_obj(
+            f"f{index}-stairs-a",
+            "stairs",
+            850,
+            300,
+            width=92,
+            height=76,
+            name="Cầu thang A",
+            target_floor_id=previous_floor.id,
+        )
+        objects = [
+            *base_objects(index), start, upper, lower, merge, stairs,
+            make_wire(f"f{index}-wire-start-upper", start, upper),
+            make_wire(f"f{index}-wire-start-lower", start, lower),
+            make_wire(f"f{index}-wire-upper-merge", upper, merge),
+            make_wire(f"f{index}-wire-lower-merge", lower, merge),
+            make_wire(f"f{index}-wire-merge-stairs", merge, stairs),
+        ]
+        all_objects.append(objects)
+
+    for floor, objects in zip(floors, all_objects):
+        _add_plan(db, building.id, floor, objects)
+    db.commit()
+
+
+def _seed_gradient_new(db: Session) -> None:
+    if db.scalar(select(Building).where(Building.code == "GRADIENT-NEW")):
+        return
+
+    building = Building(name="Gradient New Tower", code="GRADIENT-NEW")
+    db.add(building)
+    db.flush()
+    db.add(
+        User(
+            name="Gradient New Admin",
+            email="gradient_new@emberpath.demo",
+            password_hash=get_password_hash("123456"),
+            role=UserRole.ADMIN_BUILDING.value,
+            building_id=building.id,
+        )
+    )
+
     import os
     current_dir = os.path.dirname(__file__)
     json_path = os.path.join(current_dir, "gradient_demo.json")
@@ -142,68 +224,6 @@ def _seed_gradient_demo(db: Session) -> None:
                     canvas_height=p_data.get("canvas_height", 650),
                     version=p_data.get("version", 1)
                 )
-    else:
-        floors = [
-            Floor(building_id=building.id, name=f"Tầng {index}", order_index=index)
-            for index in range(1, 5)
-        ]
-        db.add_all(floors)
-        db.flush()
-
-        def base_objects(index: int) -> list[dict]:
-            return [
-                make_obj("floor-base", "floor_base", 35, 45, width=1030, height=550, name=f"Mặt bằng tầng {index}", color="#172033", locked=True),
-                make_obj("floor-label", "label", 65, 68, width=360, height=40, name=f"GRADIENT FIELD • TẦNG {index}", fontSize=24, color="#e2e8f0"),
-                make_obj("wall-top", "wall", 55, 125, width=990, height=8, name="Tường", color="#475569"),
-                make_obj("wall-bottom", "wall", 55, 545, width=990, height=8, name="Tường", color="#475569"),
-            ]
-
-        f1_entry = make_obj("f1-entry", "sensor", 120, 310, width=54, height=54, name="Node sảnh tầng 1")
-        f1_junction = make_obj("f1-junction", "sensor", 350, 310, width=54, height=54, name="Node phân nhánh")
-        f1_safe = make_obj("f1-safe", "sensor", 590, 175, width=54, height=54, name="Nhánh an toàn")
-        f1_danger = make_obj("f1-danger", "sensor", 590, 430, width=54, height=54, name="Nhánh có cháy", nodeStatus="danger")
-        f1_stairs = make_obj("f1-stairs-a", "stairs", 850, 310, width=92, height=76, name="Cầu thang A")
-        f1_exit = make_obj("f1-exit", "exit", 900, 155, width=105, height=48, name="LỐI THOÁT")
-        floor1_objects = [
-            *base_objects(1), f1_entry, f1_junction, f1_safe, f1_danger, f1_stairs, f1_exit,
-            make_wire("f1-wire-entry-junction", f1_entry, f1_junction),
-            make_wire("f1-wire-stairs-junction", f1_stairs, f1_junction),
-            make_wire("f1-wire-junction-safe", f1_junction, f1_safe),
-            make_wire("f1-wire-safe-exit", f1_safe, f1_exit),
-            make_wire("f1-wire-junction-danger", f1_junction, f1_danger),
-            make_wire("f1-wire-danger-exit", f1_danger, f1_exit),
-        ]
-
-        all_objects = [floor1_objects]
-        for index in range(2, 5):
-            previous_floor = floors[index - 2]
-            start = make_obj(f"f{index}-start", "sensor", 115, 300, width=54, height=54, name=f"Node xuất phát T{index}", nodeStatus="safe")
-            upper = make_obj(f"f{index}-upper", "sensor", 390, 175, width=54, height=54, name="Node hành lang Bắc")
-            lower = make_obj(f"f{index}-lower", "sensor", 390, 420, width=54, height=54, name="Node hành lang Nam")
-            merge = make_obj(f"f{index}-merge", "sensor", 650, 300, width=54, height=54, name="Node hợp tuyến")
-            stairs = make_obj(
-                f"f{index}-stairs-a",
-                "stairs",
-                850,
-                300,
-                width=92,
-                height=76,
-                name="Cầu thang A",
-                target_floor_id=previous_floor.id,
-            )
-            objects = [
-                *base_objects(index), start, upper, lower, merge, stairs,
-                make_wire(f"f{index}-wire-start-upper", start, upper),
-                make_wire(f"f{index}-wire-start-lower", start, lower),
-                make_wire(f"f{index}-wire-upper-merge", upper, merge),
-                make_wire(f"f{index}-wire-lower-merge", lower, merge),
-                make_wire(f"f{index}-wire-merge-stairs", merge, stairs),
-            ]
-            all_objects.append(objects)
-
-        for floor, objects in zip(floors, all_objects):
-            _add_plan(db, building.id, floor, objects)
-
     db.commit()
 
 
@@ -229,6 +249,7 @@ def seed_database(db: Session) -> None:
     if db.scalar(select(Building).limit(1)):
         _ensure_super_admin(db)
         _seed_gradient_demo(db)
+        _seed_gradient_new(db)
         return
 
     building_a = Building(name="Building A", code="B01")
@@ -345,3 +366,4 @@ def seed_database(db: Session) -> None:
     db.commit()
     _ensure_super_admin(db)
     _seed_gradient_demo(db)
+    _seed_gradient_new(db)

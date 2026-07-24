@@ -36,11 +36,11 @@ export function useRealtimeSensors(selectedFloor?: number | null, search?: strin
       sensorsApi.temperature({ floorId: null }),
     ]);
     setSummary(summaryData);
-    setMq2(mq2Data.filter((s) => REAL_DEVICE_IDS.has(s.device_id)));
-    setTemperature(tempData.filter((s) => REAL_DEVICE_IDS.has(s.device_id)));
+    setMq2(mq2Data);
+    setTemperature(tempData);
 
-    const allMq2Filtered = allMq2Data.filter((s) => REAL_DEVICE_IDS.has(s.device_id));
-    const allTempFiltered = allTempData.filter((s) => REAL_DEVICE_IDS.has(s.device_id));
+    const allMq2Filtered = allMq2Data;
+    const allTempFiltered = allTempData;
     const danger = [...allMq2Filtered, ...allTempFiltered].filter(s => s.latest_status === 'danger');
     setDangerSensors(danger);
   }

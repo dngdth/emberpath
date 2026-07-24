@@ -3,7 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { AxiosError } from 'axios';
 import { Building2, ClipboardList, ExternalLink, KeyRound, LogOut, RefreshCw, ScrollText, Search, ShieldCheck, Users } from 'lucide-react';
 import { CredentialDialog, CredentialInfo } from '../components/Admin/CredentialDialog';
+import { ConfirmModal } from '../components/MapEditor/ConfirmModal';
 import { TicketDetailDialog } from '../components/Admin/TicketDetailDialog';
+import { AuditLogSection } from '../components/Admin/AuditLogSection';
+import { TicketListTable } from '../components/Admin/TicketListTable';
+import { CustomerListSection } from '../components/Admin/CustomerListSection';
 import { SwitchTheme } from '../components/UI/SwitchTheme';
 import { adminApi } from '../services/backend';
 import { useAuthStore } from '../store/authStore';
@@ -27,20 +31,6 @@ function normalizeSearch(value: string) {
     .trim();
 }
 
-function describeAuditAction(log: AuditLog) {
-  if (log.action === 'impersonation_started') return 'Bắt đầu phiên hỗ trợ doanh nghiệp';
-  if (log.action === 'impersonated_websocket_connected') return 'Kết nối dữ liệu cảm biến trực tiếp';
-  if (log.action === 'tenant_provisioned') return 'Khởi tạo không gian doanh nghiệp';
-  if (log.action === 'password_reset') return 'Đặt lại mật khẩu khách hàng';
-  if (log.action.startsWith('lead_status_changed:')) {
-    const status = log.action.split(':')[1] as LeadStatus;
-    return `Cập nhật ticket thành “${statusLabels[status] || status}”`;
-  }
-  if (log.action === 'impersonated_request') {
-    return log.method === 'GET' ? 'Xem dữ liệu trong phiên hỗ trợ' : 'Thay đổi dữ liệu trong phiên hỗ trợ';
-  }
-  return log.action;
-}
 
 export function AdminPage() {
   const navigate = useNavigate();
@@ -57,36 +47,46 @@ export function AdminPage() {
   const [credential, setCredential] = useState<CredentialInfo | null>(null);
   const [selectedLead, setSelectedLead] = useState<CustomerLead | null>(null);
   const [search, setSearch] = useState('');
+  const [confirmResetUserId, setConfirmResetUserId] = useState<number | null>(null);
+  const [hasMoreLogs, setHasMoreLogs] = useState(true);
+  const [loadingMoreLogs, setLoadingMoreLogs] = useState(false);
 
   async function load() {
     setLoading(true); setError('');
     try {
-      const [leadData, buildingData, logData] = await Promise.all([adminApi.leads(), adminApi.buildings(), adminApi.auditLogs()]);
-      setLeads(leadData); setBuildings(buildingData); setLogs(logData);
+      const [leadData, buildingData, logData] = await Promise.all([
+        adminApi.leads(),
+        adminApi.buildings(),
+        adminApi.auditLogs(50, 0),
+      ]);
+      setLeads(leadData);
+      setBuildings(buildingData);
+      setLogs(logData);
+      setHasMoreLogs(logData.length >= 50);
     } catch (err) {
       setError((err as AxiosError<{ detail?: string }>).response?.data?.detail || 'Không thể tải dữ liệu quản trị.');
     } finally { setLoading(false); }
   }
 
+  async function loadMoreLogs() {
+    if (loadingMoreLogs || !hasMoreLogs) return;
+    setLoadingMoreLogs(true);
+    try {
+      const nextLogs = await adminApi.auditLogs(50, logs.length);
+      if (nextLogs.length < 50) {
+        setHasMoreLogs(false);
+      }
+      setLogs((prev) => [...prev, ...nextLogs]);
+    } catch (err) {
+      setError('Không thể tải thêm nhật ký audit.');
+    } finally {
+      setLoadingMoreLogs(false);
+    }
+  }
+
   useEffect(() => { document.title = 'Emberpath – Quản trị hệ thống'; void load(); }, []);
 
-  const visibleLeads = useMemo(() => {
-    const query = normalizeSearch(search);
-    const phoneQuery = search.replace(/\D/g, '');
-    return leads
-      .filter((lead) => filter === 'all' || lead.status === filter)
-      .filter((lead) => {
-        if (!query) return true;
-        const matchesText = normalizeSearch(`${lead.full_name} ${lead.phone}`).includes(query);
-        const matchesPhone = Boolean(phoneQuery) && lead.phone.replace(/\D/g, '').includes(phoneQuery);
-        return matchesText || matchesPhone;
-      })
-      .sort((first, second) => {
-        const cancellationOrder = Number(first.status === 'cancelled') - Number(second.status === 'cancelled');
-        if (cancellationOrder !== 0) return cancellationOrder;
-        return parseApiDate(second.created_at).getTime() - parseApiDate(first.created_at).getTime();
-      });
-  }, [filter, leads, search]);
+
   const counts = useMemo(() => ({
     all: leads.length,
     new: leads.filter((x) => x.status === 'new').length,
@@ -123,7 +123,6 @@ export function AdminPage() {
   }
 
   async function resetPassword(userId: number) {
-    if (!window.confirm('Tạo mật khẩu tạm thời mới cho tài khoản này? Mật khẩu hiện tại sẽ ngừng hoạt động.')) return;
     setBusy(`user-${userId}`);
     try {
       const result = await adminApi.resetPassword(userId);
@@ -142,75 +141,63 @@ export function AdminPage() {
         {error && <div className="mt-5 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-500">{error}</div>}
         {loading ? <div className="flex min-h-64 items-center justify-center"><RefreshCw className="animate-spin text-blue-500" /></div> : null}
 
-        {!loading && tab === 'leads' && <>
-          <div className="mt-7 grid grid-cols-2 gap-3 md:grid-cols-5">{(['all', 'new', 'processing', 'closed', 'cancelled'] as const).map((status) => <button key={status} onClick={() => setFilter(status)} className={`rounded-2xl border p-4 text-left ${panel} ${filter === status ? 'ring-2 ring-blue-500' : ''}`}><span className="text-2xl font-extrabold">{counts[status]}</span><span className="mt-1 block text-xs font-semibold opacity-60">{status === 'all' ? 'Tất cả ticket' : statusLabels[status]}</span></button>)}</div>
-          <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-            <div className="relative w-full sm:max-w-md">
-              <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 opacity-40" size={18} />
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Tìm theo tên hoặc số điện thoại..."
-                className={`!w-full !rounded-2xl !border !py-3 !pl-11 !pr-4 !text-sm ${darkMode ? '!border-slate-700 !bg-slate-900 !text-white' : '!border-slate-200 !bg-white !text-slate-800'}`}
-              />
-            </div>
-            <span className="text-xs font-semibold opacity-50">Hiển thị {visibleLeads.length} ticket · Bấm vào một dòng để xem chi tiết</span>
-          </div>
-          <div className={`mt-4 overflow-hidden rounded-3xl border ${panel}`}>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[1050px] text-left text-sm">
-                <thead className={darkMode ? 'bg-slate-950/50' : 'bg-slate-50'}>
-                  <tr>{['Khách hàng', 'Công trình', 'Nhu cầu', 'Ngày gửi', 'Trạng thái'].map((label) => <th key={label} className="px-5 py-4 text-xs uppercase tracking-wider opacity-60">{label}</th>)}</tr>
-                </thead>
-                <tbody>
-                  {visibleLeads.map((lead) => (
-                    <tr
-                      key={lead.id}
-                      tabIndex={0}
-                      onClick={() => setSelectedLead(lead)}
-                      onKeyDown={(event) => event.key === 'Enter' && setSelectedLead(lead)}
-                      className={`cursor-pointer border-t border-inherit align-top outline-none transition-colors ${darkMode ? 'hover:bg-slate-800/70 focus:bg-slate-800/70' : 'hover:bg-blue-50/70 focus:bg-blue-50/70'}`}
-                    >
-                      <td className="px-5 py-4"><strong>{lead.full_name}</strong><span className="mt-1 block text-xs opacity-60">{lead.phone} · {lead.email}</span>{lead.company_name && <span className="mt-1 block text-xs">{lead.company_name}</span>}</td>
-                      <td className="px-5 py-4"><span>{facilityLabels[lead.facility_type] || lead.facility_type}</span><span className="block text-xs opacity-60">{scaleLabels[lead.expected_scale] || lead.expected_scale}</span></td>
-                      <td className="max-w-sm px-5 py-4 text-xs leading-5 opacity-70"><p className="line-clamp-2 break-words">{lead.requirements || 'Chưa cung cấp'}</p>{lead.cancellation_reason && <span className="mt-2 block text-rose-500">Lý do hủy: {lead.cancellation_reason}</span>}</td>
-                      <td className="whitespace-nowrap px-5 py-4 text-xs opacity-60">{formatVietnamDateTime(lead.created_at)}</td>
-                      <td className="px-5 py-4" onClick={(event) => event.stopPropagation()}>
-                        <span className={`mb-2 inline-block rounded-full px-2.5 py-1 text-xs font-bold ${statusStyles[lead.status]}`}>{statusLabels[lead.status]}</span>
-                        <select disabled={busy === `lead-${lead.id}`} value={lead.status} onChange={(event) => void changeStatus(lead, event.target.value as LeadStatus)} className={`block min-w-40 rounded-xl border px-3 py-2 text-xs ${darkMode ? 'border-slate-700 bg-slate-950 text-white' : 'border-slate-200 bg-white'}`}><option value="new">Mới</option><option value="processing">Đang liên hệ</option><option value="closed">Thành công</option><option value="cancelled">Thất bại / Hủy</option></select>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {visibleLeads.length === 0 && <div className="p-12 text-center opacity-50">{search ? 'Không tìm thấy ticket phù hợp.' : 'Chưa có ticket trong nhóm này.'}</div>}
-            </div>
-          </div>
-        </>}
+        {!loading && tab === 'leads' && (
+          <TicketListTable
+            leads={leads}
+            search={search}
+            onSearchChange={setSearch}
+            filter={filter}
+            onFilterChange={setFilter}
+            counts={counts}
+            busy={busy}
+            darkMode={darkMode}
+            statusLabels={statusLabels}
+            statusStyles={statusStyles}
+            facilityLabels={facilityLabels}
+            scaleLabels={scaleLabels}
+            onChangeStatus={(lead, status) => void changeStatus(lead, status)}
+            onSelectLead={setSelectedLead}
+          />
+        )}
 
-        {!loading && tab === 'customers' && <div className="mt-7 grid gap-5 lg:grid-cols-2">{buildings.map((building) => <article key={building.id} className={`rounded-3xl border p-5 ${panel}`}><div className="flex items-start justify-between"><div className="flex gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-500"><Building2 /></div><div><h2 className="font-extrabold">{building.name}</h2><p className="text-xs opacity-50">{building.code} · Tạo {formatVietnamDate(building.created_at)}</p></div></div><button disabled={busy === `building-${building.id}`} onClick={() => void enterBuilding(building.id)} className="flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700"><ExternalLink size={14} />Truy cập Dashboard</button></div><div className="mt-5 space-y-2">{building.users.filter((u) => u.role !== 'super_admin').map((user) => <div key={user.id} className={`flex items-center justify-between rounded-2xl p-3 ${darkMode ? 'bg-slate-950/60' : 'bg-slate-50'}`}><div><strong className="text-sm">{user.name}</strong><span className="block text-xs opacity-50">{user.email} · {user.role}</span></div><button disabled={busy === `user-${user.id}`} onClick={() => void resetPassword(user.id)} className="flex items-center gap-1.5 rounded-xl border border-inherit px-3 py-2 text-xs font-bold hover:text-orange-500"><KeyRound size={14} />Đặt lại mật khẩu</button></div>)}</div></article>)}</div>}
+        {!loading && tab === 'customers' && (
+          <CustomerListSection
+            buildings={buildings}
+            busy={busy}
+            darkMode={darkMode}
+            facilityLabels={facilityLabels}
+            scaleLabels={scaleLabels}
+            onEnterBuilding={(id) => void enterBuilding(id)}
+            onResetPassword={(userId) => setConfirmResetUserId(userId)}
+          />
+        )}
 
-        {!loading && tab === 'audit' && <>
-          <div className={`mt-7 rounded-3xl border p-5 sm:p-6 ${panel}`}>
-            <div className="flex items-start gap-4">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-500"><ShieldCheck size={22} /></div>
-              <div><h2 className="font-extrabold">Audit log giúp kiểm soát các phiên hỗ trợ</h2><p className="mt-1 max-w-3xl text-sm leading-6 opacity-60">Mỗi lần Super Admin truy cập dashboard khách hàng, hệ thống ghi lại người thực hiện, doanh nghiệp, thời gian, hành động và địa chỉ IP. Dữ liệu này dùng để minh bạch với khách hàng, truy vết khi xảy ra sự cố và xác định trách nhiệm.</p></div>
-            </div>
-            <div className="mt-5 grid gap-3 sm:grid-cols-3"><div className={`rounded-2xl border p-4 text-sm ${darkMode ? 'border-slate-800 bg-slate-950/40' : 'border-slate-200 bg-slate-50'}`}><strong>Minh bạch hỗ trợ</strong><p className="mt-1 text-xs leading-5 opacity-55">Biết chính xác ai đã vào hệ thống khách hàng và vào lúc nào.</p></div><div className={`rounded-2xl border p-4 text-sm ${darkMode ? 'border-slate-800 bg-slate-950/40' : 'border-slate-200 bg-slate-50'}`}><strong>Điều tra sự cố</strong><p className="mt-1 text-xs leading-5 opacity-55">Đối chiếu hoạt động trước và sau khi phát sinh lỗi hoặc khiếu nại.</p></div><div className={`rounded-2xl border p-4 text-sm ${darkMode ? 'border-slate-800 bg-slate-950/40' : 'border-slate-200 bg-slate-50'}`}><strong>Bảo mật & trách nhiệm</strong><p className="mt-1 text-xs leading-5 opacity-55">Phát hiện truy cập bất thường và tránh can thiệp không có căn cứ.</p></div></div>
-          </div>
-          <div className={`mt-5 overflow-hidden rounded-3xl border ${panel}`}>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[900px] text-left text-sm">
-                <thead className={darkMode ? 'bg-slate-950/50' : 'bg-slate-50'}><tr>{['Thời gian', 'Quản trị viên', 'Doanh nghiệp', 'Hoạt động', 'IP'].map((label) => <th key={label} className="px-5 py-4 text-xs uppercase opacity-60">{label}</th>)}</tr></thead>
-                <tbody>{logs.map((log) => <tr key={log.id} className="border-t border-inherit"><td className="whitespace-nowrap px-5 py-4 text-xs">{formatVietnamDateTime(log.created_at)}</td><td className="px-5 py-4 font-semibold">{log.admin_name}</td><td className="px-5 py-4">{log.building_name}</td><td className="px-5 py-4"><span className="text-sm font-semibold">{describeAuditAction(log)}</span>{log.path && <span className="mt-1 block font-mono text-[11px] opacity-45">{log.method} {log.path}</span>}</td><td className="px-5 py-4 text-xs opacity-60">{log.ip_address || '—'}</td></tr>)}</tbody>
-              </table>
-              {logs.length === 0 && <div className="p-12 text-center opacity-50">Chưa có hoạt động audit.</div>}
-            </div>
-          </div>
-        </>}
+        {!loading && tab === 'audit' && (
+          <AuditLogSection
+            logs={logs}
+            darkMode={darkMode}
+            onLoadMore={() => void loadMoreLogs()}
+            hasMore={hasMoreLogs}
+            loadingMore={loadingMoreLogs}
+          />
+        )}
       </main>
       {credential && <CredentialDialog info={credential} onClose={() => setCredential(null)} />}
       {selectedLead && <TicketDetailDialog lead={selectedLead} darkMode={darkMode} onClose={() => setSelectedLead(null)} />}
+      <ConfirmModal
+        isOpen={confirmResetUserId !== null}
+        title="Đặt lại mật khẩu"
+        message="Tạo mật khẩu tạm thời mới cho tài khoản này? Mật khẩu hiện tại sẽ ngừng hoạt động."
+        confirmText="Đồng ý đặt lại"
+        cancelText="Hủy"
+        onConfirm={() => {
+          if (confirmResetUserId !== null) {
+            void resetPassword(confirmResetUserId);
+            setConfirmResetUserId(null);
+          }
+        }}
+        onCancel={() => setConfirmResetUserId(null)}
+      />
     </div>
   );
 }

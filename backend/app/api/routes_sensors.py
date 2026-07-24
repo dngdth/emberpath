@@ -74,6 +74,57 @@ def live_readings(db: Session = Depends(get_db), current_user: User = Depends(ge
     return results
 
 
+@router.get("/readings/history", response_model=list[SensorReadingResponse])
+def get_sensor_history(
+    floor_id: int | None = Query(default=None),
+    sensor_type: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    device_id: str | None = Query(default=None),
+    room_name: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=2000),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    query = (
+        select(SensorReading)
+        .join(SensorDevice)
+        .where(SensorDevice.building_id == current_user.building_id)
+    )
+    if floor_id and type(floor_id).__name__ != 'Query':
+        query = query.where(SensorDevice.floor_id == floor_id)
+    if sensor_type and type(sensor_type).__name__ != 'Query':
+        query = query.where(SensorDevice.sensor_type == sensor_type)
+    if status and type(status).__name__ != 'Query':
+        query = query.where(SensorReading.status == status)
+    if device_id and type(device_id).__name__ != 'Query':
+        query = query.where(SensorDevice.device_id == device_id)
+    if room_name and type(room_name).__name__ != 'Query':
+        query = query.where(SensorDevice.room_name == room_name)
+
+    limit_val = limit if isinstance(limit, int) else 100
+    offset_val = offset if isinstance(offset, int) else 0
+
+    query = query.order_by(desc(SensorReading.created_at)).offset(offset_val).limit(limit_val)
+    readings = db.scalars(query).all()
+
+    return [
+        SensorReadingResponse(
+            id=r.id,
+            device_id=r.device.device_id,
+            name=r.device.name,
+            sensor_type=r.device.sensor_type,
+            value=r.value,
+            status=r.status,
+            unit=r.unit,
+            created_at=r.created_at,
+            floor_id=r.device.floor_id,
+            room_name=r.device.room_name,
+        )
+        for r in readings
+    ]
+
+
 @ingest_router.post("/device-readings/ingest")
 async def ingest_device_reading(payload: DeviceIngestRequest, db: Session = Depends(get_db)):
     # Xác minh building gốc từ ESP32 tồn tại
@@ -90,6 +141,7 @@ async def ingest_device_reading(payload: DeviceIngestRequest, db: Session = Depe
         raise HTTPException(status_code=404, detail="Sensor device not found")
 
     timestamp = payload.timestamp or datetime.utcnow()
+
     broadcast_building_ids: set[int] = set()
     last_status = "safe"
 
@@ -112,3 +164,4 @@ async def ingest_device_reading(payload: DeviceIngestRequest, db: Session = Depe
         })
 
     return {"message": "Reading ingested", "status": last_status}
+

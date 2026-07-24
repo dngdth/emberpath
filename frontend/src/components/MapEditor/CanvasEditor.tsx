@@ -3,13 +3,18 @@ import Konva from 'konva';
 import { Circle, Group, Layer, Line, Rect, Stage, Text, Transformer } from 'react-konva';
 import { FloorPlanObject, SafePathResult } from '../../types/editor';
 import { SensorDevice } from '../../types/sensor';
-import { getDefaultSize, isResizable, isPointInPolygon } from '../../utils/geometryHelpers';
+import { getDefaultSize, isResizable } from '../../utils/geometryHelpers';
 import { snapPosition, getGuideLines } from '../../utils/snapHelpers';
 import { useThemeStore } from '../../store/themeStore';
-import { createNewObject } from '../../data/initialMockData';
 import { usePenDrawing } from '../../hooks/usePenDrawing';
 import { LedWireShape } from './Shapes/LedWireShape';
 import { WallShape } from './Shapes/WallShape';
+
+// Custom Hooks
+import { useCanvasStage } from '../../hooks/useCanvasStage';
+import { useCanvasSelection } from '../../hooks/useCanvasSelection';
+import { useCanvasAnimations } from '../../hooks/useCanvasAnimations';
+import { useEraserTool } from '../../hooks/useEraserTool';
 
 // Shape components imports
 import { FloorBaseShape } from './Shapes/FloorBaseShape';
@@ -19,9 +24,15 @@ import { ElevatorShape } from './Shapes/ElevatorShape';
 import { SensorShape } from './Shapes/SensorShape';
 import { ConnectorShape } from './Shapes/ConnectorShape';
 import { LabelShape } from './Shapes/LabelShape';
+import { ImageShape } from './Shapes/ImageShape';
 import { BelowObjectOutline } from './Shapes/BelowObjectOutline';
 import { PolygonVertexHandles } from './Shapes/PolygonVertexHandles';
 import { SheetEdgeResizers } from './Shapes/SheetEdgeResizers';
+
+// SubComponents imports
+import { CanvasBackground } from './SubComponents/CanvasBackground';
+import { DrawingPreview } from './SubComponents/DrawingPreview';
+import { GuidesOverlay } from './SubComponents/GuidesOverlay';
 
 // Overlay components imports
 import { ZoomControls } from './Overlays/ZoomControls';
@@ -38,7 +49,7 @@ interface Props {
   snapEnabled: boolean;
   onStageChange: (patch: { scale?: number; position?: { x: number; y: number } }) => void;
   onAddObject: (type: FloorPlanObject['type'], x: number, y: number) => void;
-  onAddCustomObject?: (obj: FloorPlanObject) => void;
+  onAddCustomObject?: (obj: FloorPlanObject | FloorPlanObject[]) => void;
   onSelect: (id: string, append: boolean) => void;
   onClearSelection: () => void;
   onUpdateObject: (id: string, patch: Partial<FloorPlanObject>) => void;
@@ -102,6 +113,55 @@ function CanvasEditorComponent(props: Props) {
     props.objects,
   );
 
+  // Hook 1: Stage Navigation
+  const {
+    viewport,
+    isPanning,
+    isSpacePressed,
+    startPan,
+    handleWheel,
+    handleStagePanningMove,
+    handleStagePanningUp,
+  } = useCanvasStage({
+    scale: props.scale,
+    position: props.position,
+    onStageChange: props.onStageChange,
+    onViewportChange: props.onViewportChange,
+    activeTool: props.activeTool,
+    editMode: props.editMode,
+    drawingState,
+    cancelDrawing,
+    stageRef,
+    wrapperRef,
+  });
+
+  // Hook 2: Selection & Transformer
+  const {
+    selectedObjects,
+    selectedIdSet,
+    resizeEnabled,
+  } = useCanvasSelection({
+    objects: props.objects,
+    selectedIds: props.selectedIds,
+    stageRef,
+    transformerRef,
+  });
+
+  // Hook 3: Eraser Tool
+  const {
+    isErasing,
+    erasedIds,
+    handleEraserMouseDown,
+    handleEraserMouseMove,
+    handleEraserMouseUp,
+  } = useEraserTool({
+    activeTool: props.activeTool,
+    editMode: props.editMode,
+    objects: props.objects,
+    onContextAction: props.onContextAction,
+    stageRef,
+  });
+
   const gridPattern = useMemo(() => {
     if (typeof window === 'undefined') return null;
 
@@ -129,91 +189,47 @@ function CanvasEditorComponent(props: Props) {
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; objectId: string } | null>(null);
   const [guides, setGuides] = useState<Array<{ orientation: 'vertical' | 'horizontal'; value: number }>>([]);
-  const [viewport, setViewport] = useState({ width: 1200, height: 760 });
   const [hoveredEdge, setHoveredEdge] = useState<'left' | 'right' | 'top' | 'bottom' | null>(null);
   const [dragResizeBounds, setDragResizeBounds] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const activeEdge = hoveredEdge;
 
-  const [isPanning, setIsPanning] = useState(false);
-  const [panStart, setPanStart] = useState<{ x: number; y: number } | null>(null);
-  const [panOrigin, setPanOrigin] = useState<{ x: number; y: number } | null>(null);
-
-  const [isSpacePressed, setIsSpacePressed] = useState(false);
-
   const [hoveredSensorId, setHoveredSensorId] = useState<string | null>(null);
   const [localMousePos, setLocalMousePos] = useState<{ x: number; y: number } | null>(null);
-  const [isErasing, setIsErasing] = useState(false);
-  const [erasedIds, setErasedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setHoveredSensorId(null);
-    setIsErasing(false);
-    setErasedIds(new Set());
   }, [props.activeTool]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const activeEl = document.activeElement;
-      const isInput = activeEl && (
-        activeEl.tagName === 'INPUT' ||
-        activeEl.tagName === 'TEXTAREA' ||
-        activeEl.getAttribute('contenteditable') === 'true'
-      );
-      if (e.code === 'Space' && !isInput) {
-        e.preventDefault();
-        setIsSpacePressed(true);
-      }
-      if (e.code === 'Escape') {
-        if (drawingState) {
-          cancelDrawing();
-          e.preventDefault();
-        }
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
-        setIsSpacePressed(false);
-      }
-    };
-
-    const handleBlur = () => {
-      setIsSpacePressed(false);
-      cancelDrawing();
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    window.addEventListener('blur', handleBlur);
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-      window.removeEventListener('blur', handleBlur);
-    };
-  }, [drawingState]);
+  useEffect(() => () => {
+    if (guideFrameRef.current !== null) cancelAnimationFrame(guideFrameRef.current);
+  }, []);
 
   // States for inline text editor
   const [editingLabelId, setEditingLabelId] = useState<string | null>(null);
   const [editingTextVal, setEditingTextVal] = useState('');
   const [inputPos, setInputPos] = useState({ x: 0, y: 0, width: 100, height: 30, rotation: 0 });
 
-
-  const selectedObjects = useMemo(
-    () => props.objects.filter((object) => props.selectedIds.includes(object.id)),
-    [props.objects, props.selectedIds],
-  );
-  const selectedIdSet = useMemo(() => new Set(props.selectedIds), [props.selectedIds]);
   const objectById = useMemo(
     () => new Map(props.objects.map((object) => [object.id, object])),
     [props.objects],
   );
+
+  const getObjectWithDragOverlay = useCallback(
+    (id: string) => {
+      const baseObj = objectById.get(id);
+      if (!baseObj) return undefined;
+      if (pendingGuideTargetRef.current && pendingGuideTargetRef.current.id === id) {
+        return pendingGuideTargetRef.current;
+      }
+      return baseObj;
+    },
+    [objectById],
+  );
+
   const wallObjects = useMemo(
     () => props.objects.filter((object) => object.type === 'wall'),
     [props.objects],
   );
-
-  const resizeEnabled = selectedObjects.length === 1 && isResizable(selectedObjects[0].type);
 
   // Map sensor status if provided
   const dangerDeviceIds = useMemo(() => {
@@ -266,47 +282,13 @@ function CanvasEditorComponent(props: Props) {
     return ids;
   }, [props.safePath, props.floorId]);
 
-  useEffect(() => {
-    const node = wrapperRef.current;
-    if (!node) return;
-
-    const updateViewport = () => {
-      const next = {
-        width: node.clientWidth,
-        height: node.clientHeight,
-      };
-      setViewport(next);
-      props.onViewportChange?.(next);
-    };
-
-    updateViewport();
-
-    const observer = new ResizeObserver(updateViewport);
-    observer.observe(node);
-
-    return () => observer.disconnect();
-  }, [props.onViewportChange]);
-
-  useEffect(() => () => {
-    if (guideFrameRef.current !== null) cancelAnimationFrame(guideFrameRef.current);
-  }, []);
-
-  useEffect(() => {
-    if (!transformerRef.current || !stageRef.current) return;
-
-    const nodes = props.selectedIds
-      .map((id) => stageRef.current?.findOne(`#${id}`))
-      .filter(Boolean) as Konva.Node[];
-
-    // Do not attach transformer box around polygon floor bases / rooms to let handles stand out clearly
-    const activeNodes = nodes.filter(node => {
-      const obj = props.objects.find(o => o.id === node.id());
-      return !(obj?.shapeType === 'polygon');
-    });
-
-    transformerRef.current.nodes(activeNodes);
-    transformerRef.current.getLayer()?.batchDraw();
-  }, [props.selectedIds, props.objects]);
+  // Hook 4: Canvas Animations
+  useCanvasAnimations({
+    stageRef,
+    activeWireDirectionsCount: activeWireDirections.size,
+    dangerDeviceIdsCount: dangerDeviceIds.size,
+    warningDeviceIdsCount: warningDeviceIds.size,
+  });
 
   const getSnappedSensorPointer = useCallback((pointerX: number, pointerY: number) => {
     if (props.activeTool !== 'led_wire-pen') {
@@ -376,12 +358,6 @@ function CanvasEditorComponent(props: Props) {
     );
   }
 
-  function startPan(clientX: number, clientY: number) {
-    setIsPanning(true);
-    setPanStart({ x: clientX, y: clientY });
-    setPanOrigin({ x: props.position.x, y: props.position.y });
-  }
-
   function handleMouseDown(event: Konva.KonvaEventObject<MouseEvent>) {
     setContextMenu(null);
 
@@ -391,20 +367,8 @@ function CanvasEditorComponent(props: Props) {
     const isPanningAction = isSpacePressed || event.evt.button === 1;
 
     // Eraser Tool click logic
-    if (props.editMode && props.activeTool === 'eraser' && event.evt.button === 0 && !isPanningAction) {
-      setIsErasing(true);
-      const stage = stageRef.current;
-      if (stage) {
-        const screenPointer = stage.getPointerPosition();
-        if (screenPointer) {
-          const hitIds = getObjectIdsAtPointer(stage, screenPointer);
-          if (hitIds.length > 0) {
-            setErasedIds(new Set(hitIds));
-          }
-        }
-      }
-      return;
-    }
+    const handledEraser = handleEraserMouseDown(isPanningAction, event.evt.button);
+    if (handledEraser) return;
 
     // Drawing Mode click logic (Pen Tool)
     const isPenTool = props.activeTool === 'floor_base-pen' || props.activeTool === 'led_wire-pen' || props.activeTool === 'wall-pen';
@@ -450,44 +414,17 @@ function CanvasEditorComponent(props: Props) {
   }
 
   function handleMouseMove(event: Konva.KonvaEventObject<MouseEvent>) {
-    if (isPanning && panStart && panOrigin) {
-      const dx = event.evt.clientX - panStart.x;
-      const dy = event.evt.clientY - panStart.y;
-
-      props.onStageChange({
-        position: {
-          x: panOrigin.x + dx,
-          y: panOrigin.y + dy,
-        },
-      });
-      return;
-    }
+    const handledPanning = handleStagePanningMove(event);
+    if (handledPanning) return;
 
     const pointer = stagePointerToWorld();
     if (pointer) {
       setLocalMousePos(pointer);
 
-      if (props.editMode && props.activeTool === 'eraser' && isErasing) {
-        const stage = stageRef.current;
-        if (stage) {
-          const screenPointer = stage.getPointerPosition();
-          if (screenPointer) {
-            const hitIds = getObjectIdsAtPointer(stage, screenPointer);
-            if (hitIds.length > 0) {
-              setErasedIds((prev) => {
-                const next = new Set(prev);
-                hitIds.forEach((id) => {
-                  const obj = objectById.get(id);
-                  if (obj && !obj.locked) {
-                    next.add(id);
-                  }
-                });
-                return next;
-              });
-            }
-          }
-        }
-      } else if (props.activeTool === 'led_wire-pen') {
+      const handledEraser = handleEraserMouseMove();
+      if (handledEraser) return;
+
+      if (props.activeTool === 'led_wire-pen') {
         const { pointer: snappedPointer, hoveredId } = getSnappedSensorPointer(pointer.x, pointer.y);
         setHoveredSensorId(hoveredId);
         setLocalMousePos(snappedPointer);
@@ -504,17 +441,9 @@ function CanvasEditorComponent(props: Props) {
   }
 
   function handleMouseUp() {
-    setIsPanning(false);
-    setPanStart(null);
-    setPanOrigin(null);
-
-    if (isErasing) {
-      setIsErasing(false);
-      if (erasedIds.size > 0) {
-        props.onContextAction('delete_multiple', JSON.stringify(Array.from(erasedIds)));
-      }
-      setErasedIds(new Set());
-    }
+    const handledEraser = handleEraserMouseUp();
+    if (handledEraser) return;
+    handleStagePanningUp();
   }
 
   function handleDblClick(event: Konva.KonvaEventObject<MouseEvent>) {
@@ -534,9 +463,6 @@ function CanvasEditorComponent(props: Props) {
     e.preventDefault();
     if (!props.editMode) return;
 
-    const type = e.dataTransfer.getData('text/plain') as FloorPlanObject['type'];
-    if (!type || (type as string) === 'eraser') return;
-
     const stage = stageRef.current;
     if (!stage) return;
 
@@ -550,79 +476,59 @@ function CanvasEditorComponent(props: Props) {
     const stageX = (x - props.position.x) / props.scale;
     const stageY = (y - props.position.y) / props.scale;
 
+    // Handle dropped image file
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const dataUrl = event.target?.result as string;
+          if (!dataUrl) return;
+          const img = new Image();
+          img.onload = () => {
+            let width = img.naturalWidth || 600;
+            let height = img.naturalHeight || 400;
+            const maxDim = 1000;
+            if (width > maxDim || height > maxDim) {
+              const ratio = Math.min(maxDim / width, maxDim / height);
+              width = Math.round(width * ratio);
+              height = Math.round(height * ratio);
+            }
+
+            const newImgObj: FloorPlanObject = {
+              id: `image-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+              type: 'image',
+              name: file.name ? file.name.replace(/\.[^/.]+$/, '') : 'Hình ảnh sơ đồ',
+              x: stageX,
+              y: stageY,
+              width,
+              height,
+              rotation: 0,
+              src: dataUrl,
+              opacity: 0.5,
+              visible: true,
+              locked: false,
+            };
+            props.onAddCustomObject?.(newImgObj);
+            props.onSelect(newImgObj.id, false);
+          };
+          img.src = dataUrl;
+        };
+        reader.readAsDataURL(file);
+        return;
+      }
+    }
+
+    const type = e.dataTransfer.getData('text/plain') as FloorPlanObject['type'];
+    if (!type || (type as string) === 'eraser') return;
+
     props.onAddObject(type, stageX, stageY);
   }
 
-  function handleWheel(e: any) {
-    e.evt.preventDefault();
-    const stage = stageRef.current;
-    if (!stage) return;
-
-    if (e.evt.ctrlKey) {
-      const pointer = stage.getPointerPosition();
-      if (!pointer) return;
-
-      const scaleBy = 1.05;
-      const oldScale = props.scale;
-      const nextScale = e.evt.deltaY < 0 ? oldScale * scaleBy : oldScale / scaleBy;
-      const clampedScale = Math.max(0.3, Math.min(3, nextScale));
-
-      const mousePointTo = {
-        x: (pointer.x - props.position.x) / oldScale,
-        y: (pointer.y - props.position.y) / oldScale,
-      };
-
-      props.onStageChange({
-        scale: clampedScale,
-        position: {
-          x: pointer.x - mousePointTo.x * clampedScale,
-          y: pointer.y - mousePointTo.y * clampedScale,
-        },
-      });
-    } else {
-      let dx = e.evt.deltaX;
-      let dy = e.evt.deltaY;
-
-      // Shift + scroll scrolls horizontally
-      if (e.evt.shiftKey && dx === 0) {
-        dx = dy;
-        dy = 0;
-      }
-
-      props.onStageChange({
-        position: {
-          x: props.position.x - dx,
-          y: props.position.y - dy,
-        },
-      });
-    }
-  }
-
-  // Layering helper: sorted by visual hierarchy (floor_base at bottom, led_wire behind sensors, connector at top)
-  const sortedObjects = useMemo(() => {
-    const order = [
-      'floor_base',
-      'led_wire',
-      'wall',
-      'stairs',
-      'elevator',
-      'exit',
-      'sensor',
-      'label',
-      'connector'
-    ];
-    return [...props.objects].sort((a, b) => {
-      const idxA = order.indexOf(a.type);
-      const idxB = order.indexOf(b.type);
-      const valA = idxA !== -1 ? idxA : 99;
-      const valB = idxB !== -1 ? idxB : 99;
-      return valA - valB;
-    });
-  }, [props.objects]);
-
+  // Use array order directly so user-triggered bringToFront and sendToBack reordering works
   const visibleObjects = useMemo(() => {
-    return sortedObjects.filter((o) => !erasedIds.has(o.id));
-  }, [sortedObjects, erasedIds]);
+    return props.objects.filter((o) => !erasedIds.has(o.id));
+  }, [props.objects, erasedIds]);
 
   // Memoized render functions delegating to sub-components
   const renderBelowOutline = useCallback((object: FloorPlanObject) => {
@@ -652,19 +558,45 @@ function CanvasEditorComponent(props: Props) {
       onClick: (event: Konva.KonvaEventObject<MouseEvent>) => {
         if (isSpacePressed || event.evt.button === 1) return;
         event.cancelBubble = true;
-        props.onSelect(object.id, event.evt.shiftKey);
-        const isPenTool = props.activeTool === 'floor_base-pen';
-        if (isPenTool) {
-          props.onContextAction('select', '');
+
+        if (props.activeTool.endsWith('-pen')) {
+          return;
         }
+
+        const isPlacementTool = props.activeTool !== 'select' && props.activeTool !== 'eraser';
+        if (isPlacementTool) {
+          const stage = event.target.getStage();
+          const pointer = stage?.getPointerPosition();
+          if (pointer) {
+            const worldX = (pointer.x - props.position.x) / props.scale;
+            const worldY = (pointer.y - props.position.y) / props.scale;
+            props.onAddObject(props.activeTool as FloorPlanObject['type'], worldX, worldY);
+          }
+          return;
+        }
+
+        props.onSelect(object.id, event.evt.shiftKey);
       },
       onTap: (event: Konva.KonvaEventObject<Event>) => {
         event.cancelBubble = true;
-        props.onSelect(object.id, false);
-        const isPenTool = props.activeTool === 'floor_base-pen';
-        if (isPenTool) {
-          props.onContextAction('select', '');
+
+        if (props.activeTool.endsWith('-pen')) {
+          return;
         }
+
+        const isPlacementTool = props.activeTool !== 'select' && props.activeTool !== 'eraser';
+        if (isPlacementTool) {
+          const stage = event.target.getStage();
+          const pointer = stage?.getPointerPosition();
+          if (pointer) {
+            const worldX = (pointer.x - props.position.x) / props.scale;
+            const worldY = (pointer.y - props.position.y) / props.scale;
+            props.onAddObject(props.activeTool as FloorPlanObject['type'], worldX, worldY);
+          }
+          return;
+        }
+
+        props.onSelect(object.id, false);
       },
       onDblClick: (e: any) => {
         if (!props.editMode) return;
@@ -708,12 +640,64 @@ function CanvasEditorComponent(props: Props) {
       onDragMove: (event: Konva.KonvaEventObject<DragEvent>) => {
         const next = { x: event.target.x(), y: event.target.y() };
         pendingGuideTargetRef.current = { ...object, ...next };
+
+        // Real-time update of polygon vertex handles position
+        if (object.shapeType === 'polygon') {
+          const handlesGroup = event.target.getStage()?.findOne(`#vertex-handles-${object.id}`);
+          if (handlesGroup) {
+            handlesGroup.x(next.x);
+            handlesGroup.y(next.y);
+          }
+        }
+
         if (guideFrameRef.current === null && performance.now() - lastGuideUpdateRef.current >= 32) {
           guideFrameRef.current = requestAnimationFrame(() => {
             guideFrameRef.current = null;
             lastGuideUpdateRef.current = performance.now();
             const target = pendingGuideTargetRef.current;
-            if (target) setGuides(getGuideLines(target, props.objects));
+            if (target) {
+              setGuides(getGuideLines(target, props.objects));
+
+              // Real-time update of any connected led_wire or connector
+              const size = getDefaultSize(object.type);
+              const nodeCenterX = target.x + (object.width ?? size.width) / 2;
+              const nodeCenterY = target.y + (object.height ?? size.height) / 2;
+
+              props.objects.forEach((obj) => {
+                if (obj.type === 'led_wire' || obj.type === 'connector') {
+                  const isFrom = obj.fromNodeId === object.id;
+                  const isTo = obj.toNodeId === object.id;
+                  if (isFrom || isTo) {
+                    const group = event.target.getStage()?.findOne(`#${obj.id}`);
+                    if (group instanceof Konva.Group) {
+                      const relX = nodeCenterX - group.x();
+                      const relY = nodeCenterY - group.y();
+
+                      const lines = group.find('Line');
+                      const arrows = group.find('Arrow');
+                      [...lines, ...arrows].forEach((line) => {
+                        if (line instanceof Konva.Line) {
+                          const pts = [...line.points()];
+                          if (pts.length >= 4) {
+                            if (isFrom) {
+                              pts[0] = relX;
+                              pts[1] = relY;
+                            }
+                            if (isTo) {
+                              pts[pts.length - 2] = relX;
+                              pts[pts.length - 1] = relY;
+                            }
+                            line.points(pts);
+                          }
+                        }
+                      });
+                    }
+                  }
+                }
+              });
+
+              event.target.getLayer()?.batchDraw();
+            }
           });
         }
       },
@@ -725,6 +709,38 @@ function CanvasEditorComponent(props: Props) {
         pendingGuideTargetRef.current = null;
         setGuides([]);
       },
+      onTransform: (event: Konva.KonvaEventObject<Event>) => {
+        if (object.type === 'label') {
+          const node = event.target;
+          if (node instanceof Konva.Container) {
+            const scaleX = node.scaleX();
+            const scaleY = node.scaleY();
+            
+            node.scaleX(1);
+            node.scaleY(1);
+
+            const activeAnchor = transformerRef.current?.getActiveAnchor();
+            const isDiagonal = activeAnchor && ['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(activeAnchor);
+
+            const textNode = node.findOne('Text') as Konva.Text | undefined;
+            const newWidth = Math.max(16, node.width() * scaleX);
+            const newHeight = Math.max(16, node.height() * scaleY);
+            
+            node.width(newWidth);
+            node.height(newHeight);
+
+            if (textNode) {
+              textNode.width(newWidth);
+              if (isDiagonal) {
+                const currentFontSize = textNode.fontSize() || object.fontSize || 22;
+                const newFontSize = Math.max(8, Math.round(currentFontSize * scaleY));
+                textNode.fontSize(newFontSize);
+              }
+            }
+            node.getStage()?.batchDraw();
+          }
+        }
+      },
       onTransformEnd: (event: Konva.KonvaEventObject<Event>) => {
         const node = event.target;
         const scaleX = node.scaleX();
@@ -732,13 +748,39 @@ function CanvasEditorComponent(props: Props) {
         node.scaleX(1);
         node.scaleY(1);
 
-        props.onUpdateObject(object.id, {
-          x: node.x(),
-          y: node.y(),
-          width: Math.max(16, width * scaleX),
-          height: Math.max(16, height * scaleY),
-          rotation: node.rotation(),
-        });
+        if (object.type === 'label') {
+          const activeAnchor = transformerRef.current?.getActiveAnchor();
+          const isDiagonal = activeAnchor && ['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(activeAnchor);
+
+          if (isDiagonal) {
+            const currentFontSize = object.fontSize || 22;
+            const newFontSize = Math.max(8, Math.round(currentFontSize * scaleY));
+            props.onUpdateObject(object.id, {
+              x: node.x(),
+              y: node.y(),
+              width: Math.max(16, width * scaleX),
+              height: Math.max(16, height * scaleY),
+              fontSize: newFontSize,
+              rotation: node.rotation(),
+            });
+          } else {
+            props.onUpdateObject(object.id, {
+              x: node.x(),
+              y: node.y(),
+              width: Math.max(16, width * scaleX),
+              height: Math.max(16, height * scaleY),
+              rotation: node.rotation(),
+            });
+          }
+        } else {
+          props.onUpdateObject(object.id, {
+            x: node.x(),
+            y: node.y(),
+            width: Math.max(16, width * scaleX),
+            height: Math.max(16, height * scaleY),
+            rotation: node.rotation(),
+          });
+        }
       },
     };
 
@@ -808,14 +850,24 @@ function CanvasEditorComponent(props: Props) {
             active={wireDirection !== undefined}
             reverse={wireDirection?.reverse ?? false}
             status={wireDirection?.status}
-            fromNode={object.fromNodeId ? objectById.get(object.fromNodeId) : undefined}
-            toNode={object.toNodeId ? objectById.get(object.toNodeId) : undefined}
+            fromNode={object.fromNodeId ? getObjectWithDragOverlay(object.fromNodeId) : undefined}
+            toNode={object.toNodeId ? getObjectWithDragOverlay(object.toNodeId) : undefined}
             commonProps={commonProps}
           />
         );
       case 'wall':
         return (
           <WallShape
+            key={object.id}
+            object={object}
+            selected={selected}
+            isDark={isDark}
+            commonProps={commonProps}
+          />
+        );
+      case 'image':
+        return (
+          <ImageShape
             key={object.id}
             object={object}
             selected={selected}
@@ -830,8 +882,8 @@ function CanvasEditorComponent(props: Props) {
             object={object}
             selected={selected}
             isDark={isDark}
-            fromNode={object.fromNodeId ? objectById.get(object.fromNodeId) : undefined}
-            toNode={object.toNodeId ? objectById.get(object.toNodeId) : undefined}
+            fromNode={object.fromNodeId ? getObjectWithDragOverlay(object.fromNodeId) : undefined}
+            toNode={object.toNodeId ? getObjectWithDragOverlay(object.toNodeId) : undefined}
             wallObjects={wallObjects}
             commonProps={commonProps}
           />
@@ -863,57 +915,13 @@ function CanvasEditorComponent(props: Props) {
     props.onSelect,
     props.onUpdateObject,
     props.onContextAction,
-    objectById,
+    getObjectWithDragOverlay,
     wallObjects,
     activeWireDirections,
     activeStairIds,
     props.objects,
     hoveredSensorId,
   ]);
-
-  const hasSafePathAnimation = activeWireDirections.size > 0;
-  const hasStatusAnimation = dangerRooms.size > 0 || dangerDeviceIds.size > 0 || warningDeviceIds.size > 0;
-
-  useEffect(() => {
-    const stage = stageRef.current;
-    if (!stage || (!hasSafePathAnimation && !hasStatusAnimation)) return;
-
-    let dashOffset = 0;
-    let previousBlinkPhase: boolean | null = null;
-
-    const anim = new Konva.Animation((frame) => {
-      if (!frame) return;
-      const time = frame.time;
-
-      // 1. Animate evacuation path line dashOffset & LED wires
-      const timeDiff = frame.timeDiff;
-      dashOffset = (dashOffset - (timeDiff * 0.05)) % 40;
-      const activeLedWires = stage.find('.active-led-wire');
-      activeLedWires.forEach((node) => {
-        (node as any).dashOffset(dashOffset);
-      });
-
-      // 2. Animate blinking warning sensors (500ms intervals)
-      const isAlt = Math.floor(time / 500) % 2 === 0;
-      if (!hasStatusAnimation || isAlt === previousBlinkPhase) return;
-      previousBlinkPhase = isAlt;
-
-      const dangerSensors = stage.find('.danger-blink-sensor');
-      dangerSensors.forEach((node) => {
-        node.opacity(isAlt ? 1.0 : 0.4);
-      });
-
-      const warningSensors = stage.find('.warning-blink-sensor');
-      warningSensors.forEach((node) => {
-        node.opacity(isAlt ? 1.0 : 0.6);
-      });
-    });
-
-    anim.start();
-    return () => {
-      anim.stop();
-    };
-  }, [hasSafePathAnimation, hasStatusAnimation]);
 
   return (
     <div
@@ -937,37 +945,15 @@ function CanvasEditorComponent(props: Props) {
         onDblClick={handleDblClick}
       >
         {/* Workspace Canvas (Drawing sheet background) */}
-        <Layer>
-          <Group x={props.position.x} y={props.position.y}>
-            <Rect
-              name="workspace-empty"
-              x={0}
-              y={0}
-              width={canvasWidth * props.scale}
-              height={canvasHeight * props.scale}
-              fill={isDark ? '#0f172a' : '#f8fafc'}
-              stroke={isDark ? '#1e293b' : '#cbd5e1'}
-              strokeWidth={1.5}
-              cornerRadius={8}
-              shadowColor="rgba(0, 0, 0, 0.08)"
-              shadowBlur={16}
-            />
-            {props.snapEnabled && gridPattern && (
-              <Rect
-                x={0}
-                y={0}
-                width={canvasWidth * props.scale}
-                height={canvasHeight * props.scale}
-                fillPatternImage={gridPattern as any}
-                fillPatternScaleX={props.scale}
-                fillPatternScaleY={props.scale}
-                fillPatternRepeat="repeat"
-                opacity={1.0}
-                listening={false}
-              />
-            )}
-          </Group>
-        </Layer>
+        <CanvasBackground
+          position={props.position}
+          canvasWidth={canvasWidth}
+          canvasHeight={canvasHeight}
+          scale={props.scale}
+          isDark={isDark}
+          snapEnabled={props.snapEnabled}
+          gridPattern={gridPattern}
+        />
 
         <Layer>
           <Group x={props.position.x} y={props.position.y} scaleX={props.scale} scaleY={props.scale}>
@@ -981,53 +967,12 @@ function CanvasEditorComponent(props: Props) {
             {visibleObjects.map(renderPlanObject)}
 
             {/* Pen Tool drawing preview */}
-            {drawingState && mousePos && (
-              <Group x={drawingState.startX} y={drawingState.startY}>
-                <Line
-                  points={[
-                    ...drawingState.points,
-                    mousePos.x - drawingState.startX,
-                    mousePos.y - drawingState.startY,
-                  ]}
-                  stroke="#3b82f6"
-                  strokeWidth={drawingState.type === 'led_wire' || drawingState.type === 'wall' ? 3.5 : 2}
-                  dash={[4, 4]}
-                />
-                {/* Closed polygon start indicator */}
-                {drawingState.type !== 'led_wire' && drawingState.type !== 'wall' && drawingState.points.length >= 6 && Math.hypot(mousePos.x - drawingState.startX, mousePos.y - drawingState.startY) < 12 && (
-                  <Circle
-                    x={0}
-                    y={0}
-                    radius={8}
-                    fill="rgba(16, 185, 129, 0.5)"
-                    stroke="#10b981"
-                    strokeWidth={2}
-                  />
-                )}
-                {/* Open path node connector snap preview indicator */}
-                {(drawingState.type === 'led_wire' || drawingState.type === 'wall') && (
-                  <Circle
-                    x={mousePos.x - drawingState.startX}
-                    y={mousePos.y - drawingState.startY}
-                    radius={5}
-                    fill="#3b82f6"
-                  />
-                )}
-              </Group>
-            )}
-
-            {/* Render drawing guide lines (snapped axes) */}
-            {drawingState && guideLines && guideLines.map((guide, idx) => (
-              <Line
-                key={`guide-${idx}`}
-                points={guide.points}
-                stroke="#10b981"
-                strokeWidth={1.5 / props.scale}
-                dash={[6, 4]}
-                opacity={0.7}
-                listening={false}
-              />
-            ))}
+            <DrawingPreview
+              drawingState={drawingState}
+              mousePos={mousePos}
+              guideLines={guideLines}
+              scale={props.scale}
+            />
 
             {/* Eraser Brush Circle Preview */}
             {props.editMode && props.activeTool === 'eraser' && localMousePos && (
@@ -1049,28 +994,18 @@ function CanvasEditorComponent(props: Props) {
                 stageRef={stageRef}
                 onUpdateObject={props.onUpdateObject}
                 onContextAction={props.onContextAction}
+                fromNode={selectedObjects[0].fromNodeId ? getObjectWithDragOverlay(selectedObjects[0].fromNodeId) : undefined}
+                toNode={selectedObjects[0].toNodeId ? getObjectWithDragOverlay(selectedObjects[0].toNodeId) : undefined}
               />
             )}
 
             {/* Snapping guidelines in Edit Mode */}
-            {props.editMode &&
-              guides.map((guide, index) =>
-                guide.orientation === 'vertical' ? (
-                  <Line
-                    key={`guide-${index}`}
-                    points={[guide.value, 0, guide.value, canvasHeight]}
-                    stroke="#c2410c"
-                    dash={[4, 6]}
-                  />
-                ) : (
-                  <Line
-                    key={`guide-${index}`}
-                    points={[0, guide.value, canvasWidth, guide.value]}
-                    stroke="#c2410c"
-                    dash={[4, 6]}
-                  />
-                ),
-              )}
+            <GuidesOverlay
+              editMode={props.editMode}
+              guides={guides}
+              canvasWidth={canvasWidth}
+              canvasHeight={canvasHeight}
+            />
 
             {/* Selection transformer inside Edit Mode only */}
             {props.editMode && (

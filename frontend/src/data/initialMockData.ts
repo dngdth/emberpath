@@ -2,14 +2,14 @@ import { FloorPlanObject, ObjectType } from '../types/editor';
 import { getDefaultSize } from '../utils/geometryHelpers';
 
 export const tokenLibrary: Array<{ type: string; label: string; description: string }> = [
-  { type: 'floor_base', label: 'Nền tầng (Chữ nhật)', description: 'Diện tích chung sàn dạng hình chữ nhật' },
-  { type: 'floor_base-pen', label: 'Nền tầng (Bút vẽ - Pen)', description: 'Chấm điểm vẽ đa giác tự do cho nền sàn' },
+  { type: 'floor_base', label: 'Nền tầng', description: 'Diện tích chung sàn dạng hình chữ nhật' },
+  { type: 'floor_base-pen', label: 'Nền tầng', description: 'Chấm điểm vẽ đa giác tự do cho nền sàn' },
   { type: 'exit', label: 'Lối thoát hiểm', description: 'Điểm thoát khẩn cấp an toàn' },
   { type: 'stairs', label: 'Cầu thang', description: 'Cầu thang bộ hoặc thang thoát hiểm' },
   { type: 'elevator', label: 'Thang máy', description: 'Thang máy di chuyển liên tầng' },
   { type: 'sensor', label: 'Node Cảm biến', description: 'Nút cảm biến nhiệt độ và khói hợp nhất' },
-  { type: 'led_wire-pen', label: 'Dây đèn LED (Bút vẽ)', description: 'Vẽ đường dây đèn LED kết nối các node cảm biến' },
-  { type: 'wall-pen', label: 'Tường (Bút vẽ)', description: 'Vẽ các đường tường ngăn cách tự do không khép kín' },
+  { type: 'led_wire-pen', label: 'Dây đèn LED', description: 'Vẽ đường dây đèn LED kết nối các node cảm biến' },
+  { type: 'wall-pen', label: 'Tường', description: 'Vẽ các đường tường ngăn cách tự do không khép kín' },
   { type: 'label', label: 'Nhãn chữ tự do', description: 'Văn bản chú thích trên sơ đồ' },
 ];
 
@@ -21,19 +21,19 @@ export function createNewObject(type: string, x = 120, y = 120): FloorPlanObject
   const actualType = isFloorBase
     ? 'floor_base'
     : isRoom
-    ? 'room'
-    : isLedWire
-    ? 'led_wire'
-    : isWall
-    ? 'wall'
-    : type as ObjectType;
+      ? 'room'
+      : isLedWire
+        ? 'led_wire'
+        : isWall
+          ? 'wall'
+          : type as ObjectType;
 
   const size = getDefaultSize(actualType);
   const baseName = {
     floor_base: 'Nền tầng',
     room: 'Phòng mới',
     door: 'Cửa',
-    exit: 'LỐI THOÁT',
+    exit: 'EXIT',
     stairs: 'Cầu thang',
     elevator: 'Thang máy',
     wall: 'Tường',
@@ -44,6 +44,7 @@ export function createNewObject(type: string, x = 120, y = 120): FloorPlanObject
     connector: 'Đường nối',
     sensor: 'Cảm biến',
     led_wire: 'Dây LED',
+    image: 'Hình ảnh sơ đồ',
   }[actualType] || 'Vật thể';
 
   const shapeType = type.endsWith('-pen') ? 'polygon' : 'rect';

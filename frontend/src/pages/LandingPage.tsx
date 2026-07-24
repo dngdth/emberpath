@@ -1,16 +1,18 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Navbar } from '../components/Landing/Navbar';
 import { HeroSection } from '../components/Landing/HeroSection';
 import { ProblemSolution } from '../components/Landing/ProblemSolution';
 import { FeaturesSection } from '../components/Landing/FeaturesSection';
 import { HowItWorks } from '../components/Landing/HowItWorks';
-import { BottomCTA } from '../components/Landing/BottomCTA';
 import { Footer } from '../components/Landing/Footer';
 import { ConsultationSection } from '../components/Landing/ConsultationSection';
+import { ConsultationModal } from '../components/Landing/ConsultationModal';
+import { FloatingContactButton } from '../components/Landing/FloatingContactButton';
 import { useThemeStore } from '../store/themeStore';
 
 export function LandingPage() {
   const { darkMode } = useThemeStore();
+  const [isConsultationOpen, setIsConsultationOpen] = useState(false);
 
   // Set the document title on page load
   useEffect(() => {
@@ -28,6 +30,7 @@ export function LandingPage() {
   }, [darkMode]);
 
   const isDark = darkMode;
+  const handleOpenConsultation = () => setIsConsultationOpen(true);
 
   return (
     <div
@@ -37,10 +40,10 @@ export function LandingPage() {
       style={{ fontFamily: "'Inter', sans-serif" }}
     >
       {/* Navbar */}
-      <Navbar isDark={isDark} />
+      <Navbar isDark={isDark} onOpenConsultation={handleOpenConsultation} />
 
       {/* Hero Section */}
-      <HeroSection isDark={isDark} />
+      <HeroSection isDark={isDark} onOpenConsultation={handleOpenConsultation} />
 
       {/* Problem & Solution */}
       <ProblemSolution isDark={isDark} />
@@ -51,13 +54,23 @@ export function LandingPage() {
       {/* How It Works (Emergency Operation Journey) */}
       <HowItWorks isDark={isDark} />
 
-      <ConsultationSection isDark={isDark} />
-
-      {/* Bottom CTA */}
-      <BottomCTA isDark={isDark} />
+      <ConsultationSection isDark={isDark} onOpenConsultation={handleOpenConsultation} />
 
       {/* Footer */}
       <Footer isDark={isDark} />
+
+      {/* Consultation Fullscreen Popup */}
+      <ConsultationModal 
+        isOpen={isConsultationOpen} 
+        onClose={() => setIsConsultationOpen(false)} 
+        isDark={isDark} 
+      />
+
+      {/* Floating Contact Widget */}
+      <FloatingContactButton
+        isDark={isDark}
+        onOpenConsultation={handleOpenConsultation}
+      />
     </div>
   );
 }

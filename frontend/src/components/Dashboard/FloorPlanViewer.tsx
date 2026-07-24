@@ -21,6 +21,7 @@ import { LedWireShape } from '../MapEditor/Shapes/LedWireShape';
 import { LedShape } from '../MapEditor/Shapes/LedShape';
 import { ConnectorShape } from '../MapEditor/Shapes/ConnectorShape';
 import { LabelShape } from '../MapEditor/Shapes/LabelShape';
+import { ImageShape } from '../MapEditor/Shapes/ImageShape';
 
 interface Props {
   floorId: number | null;
@@ -101,7 +102,7 @@ export function FloorPlanViewer({
 
   const hoveredSensorData = useMemo(() => {
     if (!hoveredSensorId) return null;
-    const found = sensors.find((s) => s.device_id === hoveredSensorId);
+    const found = sensors.find((s) => s.device_id === hoveredSensorId || s.device_id.endsWith(hoveredSensorId));
     if (found) return found;
 
     // Fallback info for mock/unlinked sensors
@@ -377,7 +378,8 @@ export function FloorPlanViewer({
     
     objects.forEach((obj) => {
       if (obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp') {
-        if (dangerDeviceIds.has(obj.id)) {
+        const hasDanger = Array.from(dangerDeviceIds).some(did => did === obj.id || did.endsWith(obj.id));
+        if (hasDanger) {
           dangerPositions.push({ x: obj.x, y: obj.y });
         }
       }
@@ -445,27 +447,7 @@ export function FloorPlanViewer({
 
 
 
-  // Layering helper: sorted by visual hierarchy (floor_base at bottom, led_wire behind sensors, connector at top)
-  const sortedObjects = useMemo(() => {
-    const order = [
-      'floor_base',
-      'led_wire',
-      'wall',
-      'stairs',
-      'elevator',
-      'exit',
-      'sensor',
-      'label',
-      'connector'
-    ];
-    return [...objects].sort((a, b) => {
-      const idxA = order.indexOf(a.type);
-      const idxB = order.indexOf(b.type);
-      const valA = idxA !== -1 ? idxA : 99;
-      const valB = idxB !== -1 ? idxB : 99;
-      return valA - valB;
-    });
-  }, [objects]);
+  // Render objects on Konva layer in array order (preserving user z-index choices)
 
   // Render objects on Konva layer
   const renderObject = (obj: FloorPlanObject) => {
@@ -505,6 +487,17 @@ export function FloorPlanViewer({
         ? () => handleTouchMove()
         : undefined,
     };
+
+    if (obj.type === 'image') {
+      return (
+        <ImageShape
+          object={obj}
+          selected={false}
+          isDark={isDark}
+          commonProps={commonProps}
+        />
+      );
+    }
 
     if (obj.type === 'floor_base') {
       return (
@@ -586,9 +579,10 @@ export function FloorPlanViewer({
     }
 
     if (obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp') {
-      const isDanger = dangerDeviceIds.has(obj.id) || obj.nodeStatus === 'danger';
-      const isWarning = warningDeviceIds.has(obj.id);
-      const reading = sensorValues.get(obj.id);
+      const isDanger = Array.from(dangerDeviceIds).some(did => did === obj.id || did.endsWith(obj.id)) || obj.nodeStatus === 'danger';
+      const isWarning = Array.from(warningDeviceIds).some(did => did === obj.id || did.endsWith(obj.id));
+      const matchKey = Array.from(sensorValues.keys()).find(k => k === obj.id || k.endsWith(obj.id));
+      const reading = matchKey ? sensorValues.get(matchKey) : undefined;
 
       return (
         <SensorShape
@@ -792,7 +786,7 @@ export function FloorPlanViewer({
             scaleY={scale}
           >
             {/* Render all structural objects (Layered bases first) */}
-            {sortedObjects.map((object) => (
+            {objects.map((object) => (
               <Fragment key={object.id}>{renderObject(object)}</Fragment>
             ))}
 

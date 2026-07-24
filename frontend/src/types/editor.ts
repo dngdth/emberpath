@@ -1,4 +1,4 @@
-export type ObjectType = 'floor_base' | 'room' | 'door' | 'exit' | 'stairs' | 'elevator' | 'wall' | 'mq2' | 'temp' | 'led' | 'label' | 'connector' | 'sensor' | 'led_wire';
+export type ObjectType = 'floor_base' | 'room' | 'door' | 'exit' | 'stairs' | 'elevator' | 'wall' | 'mq2' | 'temp' | 'led' | 'label' | 'connector' | 'sensor' | 'led_wire' | 'image';
 
 export interface FloorPlanObject {
   id: string;
@@ -20,6 +20,8 @@ export interface FloorPlanObject {
   shapeType?: 'rect' | 'polygon';
   target_floor_id?: number;
   points?: number[];
+  src?: string;
+  opacity?: number;
 }
 
 export interface FloorItem {

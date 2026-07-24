@@ -33,14 +33,22 @@ export const ContextMenu: React.FC<ContextMenuProps> = React.memo(({
           }}
           className={clsx(
             'block w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition',
-            isDark ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-55'
+            isDark ? 'text-slate-300 hover:bg-slate-800' : 'text-slate-700 hover:bg-slate-100'
           )}
         >
           {action === 'front'
-            ? 'Bring to front'
+            ? 'Lên trên cùng'
             : action === 'back'
-            ? 'Send to back'
-            : action.charAt(0).toUpperCase() + action.slice(1)}
+              ? 'Xuống dưới cùng'
+              : action === 'rename'
+                ? 'Đổi tên'
+                : action === 'duplicate'
+                  ? 'Nhân đôi'
+                  : action === 'delete'
+                    ? 'Xóa'
+                    : action === 'lock'
+                      ? 'Khóa / Mở khóa'
+                      : action}
         </button>
       ))}
     </div>

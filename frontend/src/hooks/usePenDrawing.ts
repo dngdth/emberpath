@@ -92,7 +92,7 @@ function getSnappedDrawingPoint(
 
 export function usePenDrawing(
   activeTool: string,
-  onAddCustomObject: ((obj: FloorPlanObject) => void) | undefined,
+  onAddCustomObject: ((obj: FloorPlanObject | FloorPlanObject[]) => void) | undefined,
   onAddObject: (type: any, x: number, y: number) => void,
   onSelect: (id: string, append: boolean) => void,
   onCancel: () => void,
@@ -158,16 +158,96 @@ export function usePenDrawing(
     newObj.points = relativePoints;
 
     if (baseType === 'led_wire' && points.length >= 4) {
-      const firstX = drawingState.startX + points[0];
-      const firstY = drawingState.startY + points[1];
-      const lastX = drawingState.startX + points[points.length - 2];
-      const lastY = drawingState.startY + points[points.length - 1];
-      const fromNode = nearestRouteNode(objects, firstX, firstY);
-      const toNode = nearestRouteNode(objects, lastX, lastY, fromNode?.id);
-      newObj.fromNodeId = fromNode?.id;
-      newObj.toNodeId = toNode?.id;
+      const nodes: (FloorPlanObject | undefined)[] = [];
+      const nodeIndices: number[] = [];
+      
+      for (let i = 0; i < points.length; i += 2) {
+        const ptX = drawingState.startX + points[i];
+        const ptY = drawingState.startY + points[i + 1];
+        const node = nearestRouteNode(objects, ptX, ptY);
+        nodes.push(node);
+        if (node) {
+          nodeIndices.push(i / 2);
+        }
+      }
+
+      if (nodeIndices.length > 1) {
+        const segments: FloorPlanObject[] = [];
+        const splitIndices: number[] = [];
+
+        if (nodeIndices[0] > 0) {
+          splitIndices.push(0);
+        }
+
+        for (const idx of nodeIndices) {
+          splitIndices.push(idx);
+        }
+
+        if (nodeIndices[nodeIndices.length - 1] < points.length / 2 - 1) {
+          splitIndices.push(points.length / 2 - 1);
+        }
+
+        for (let i = 0; i < splitIndices.length - 1; i++) {
+          const startIdx = splitIndices[i];
+          const endIdx = splitIndices[i + 1];
+          if (startIdx === endIdx) continue;
+
+          const segPoints: number[] = [];
+          for (let j = startIdx; j <= endIdx; j++) {
+            segPoints.push(drawingState.startX + points[2 * j]);
+            segPoints.push(drawingState.startY + points[2 * j + 1]);
+          }
+
+          let segMinX = Infinity;
+          let segMinY = Infinity;
+          for (let j = 0; j < segPoints.length; j += 2) {
+            segMinX = Math.min(segMinX, segPoints[j]);
+            segMinY = Math.min(segMinY, segPoints[j + 1]);
+          }
+
+          const segRelativePoints: number[] = [];
+          for (let j = 0; j < segPoints.length; j += 2) {
+            segRelativePoints.push(segPoints[j] - segMinX);
+            segRelativePoints.push(segPoints[j + 1] - segMinY);
+          }
+
+          const segObj = createNewObject(baseType + '-pen', segMinX, segMinY);
+          segObj.points = segRelativePoints;
+          segObj.fromNodeId = nodes[startIdx]?.id;
+          segObj.toNodeId = nodes[endIdx]?.id;
+          segObj.shapeType = 'polygon';
+          segments.push(segObj);
+        }
+
+        if (segments.length > 0) {
+          if (onAddCustomObject) {
+            onAddCustomObject(segments);
+          } else {
+            for (const seg of segments) {
+              onAddObject(seg.type, seg.x, seg.y);
+            }
+          }
+
+          setDrawingState(null);
+          setMousePos(null);
+          setGuideLines([]);
+          onSelect(segments[segments.length - 1].id, false);
+          onCancel();
+          return;
+        }
+      } else {
+        // Fallback for 0 or 1 connected nodes
+        const firstX = drawingState.startX + points[0];
+        const firstY = drawingState.startY + points[1];
+        const lastX = drawingState.startX + points[points.length - 2];
+        const lastY = drawingState.startY + points[points.length - 1];
+        const fromNode = nearestRouteNode(objects, firstX, firstY);
+        const toNode = nearestRouteNode(objects, lastX, lastY, fromNode?.id);
+        newObj.fromNodeId = fromNode?.id;
+        newObj.toNodeId = toNode?.id;
+      }
     }
-    
+
     // Set shapeType to polygon for Konva compatibility
     newObj.shapeType = 'polygon';
 

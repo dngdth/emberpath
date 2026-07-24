@@ -51,7 +51,16 @@ export function BottomCTA({ isDark }: BottomCTAProps) {
               {/* Action Button */}
               <div className="pt-4">
                 <a
-                  href={token ? '/dashboard' : '/register'}
+                  href={token ? '/dashboard' : '#consultation'}
+                  onClick={(e) => {
+                    if (!token) {
+                      e.preventDefault();
+                      const element = document.querySelector('#consultation');
+                      if (element) {
+                        element.scrollIntoView({ behavior: 'smooth' });
+                      }
+                    }
+                  }}
                   className={`inline-flex items-center gap-2 rounded-xl px-8 py-4 text-base font-bold transition-all hover:scale-[1.03] active:scale-95 shadow-xl bg-gradient-to-r from-[#F97316] to-[#EA580C] text-white hover:from-orange-600 hover:to-orange-700 duration-300 ${isDark
                     ? 'shadow-orange-500/25 border border-orange-500/10'
                     : 'shadow-orange-600/30 border border-orange-400/20'

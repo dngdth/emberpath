@@ -8,6 +8,7 @@ import { SwitchTheme } from '../components/UI/SwitchTheme';
 import { LoginBrandPanel } from '../components/Login/LoginBrandPanel';
 import { LoginForm } from '../components/Login/LoginForm';
 import { DemoAccounts } from '../components/Login/DemoAccounts';
+import { ConsultationModal } from '../components/Landing/ConsultationModal';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -17,6 +18,7 @@ export function LoginPage() {
   const [email, setEmail] = useState('admin@buildinga.demo');
   const [password, setPassword] = useState('123456');
   const [error, setError] = useState('');
+  const [isConsultationOpen, setIsConsultationOpen] = useState(false);
 
   // Set page title
   useEffect(() => {
@@ -48,11 +50,23 @@ export function LoginPage() {
 
   return (
     <div
-      className={`min-h-screen w-full flex items-center justify-center transition-colors duration-300 p-4 sm:p-6 lg:p-8 relative ${
-        isDark ? 'dark bg-[#0F172A] text-slate-100' : 'bg-slate-50 text-slate-800'
+      className={`min-h-screen w-full flex items-center justify-center transition-colors duration-300 p-4 sm:p-6 lg:p-8 relative overflow-hidden ${
+        isDark ? 'dark bg-[#0B132B] text-slate-100' : 'bg-slate-50 text-slate-800'
       }`}
       style={{ fontFamily: "'Inter', sans-serif" }}
     >
+      {/* Outer Ambient Radiant Glow Orbs */}
+      <div
+        className={`absolute top-[-10%] left-[10%] w-[500px] h-[500px] rounded-full blur-[120px] pointer-events-none transition-all duration-500 ${
+          isDark ? 'bg-blue-600/20' : 'bg-blue-400/15'
+        }`}
+      />
+      <div
+        className={`absolute bottom-[-10%] right-[10%] w-[500px] h-[500px] rounded-full blur-[120px] pointer-events-none transition-all duration-500 ${
+          isDark ? 'bg-orange-600/20' : 'bg-orange-400/15'
+        }`}
+      />
+
       {/* Floating Switch Theme Button */}
       <div className="absolute top-4 right-4 sm:top-6 sm:right-6 z-20">
         <SwitchTheme />
@@ -99,6 +113,7 @@ export function LoginPage() {
             loading={loading}
             error={error}
             isDark={isDark}
+            onOpenConsultation={() => setIsConsultationOpen(true)}
           />
 
           {/* Separator */}
@@ -114,6 +129,13 @@ export function LoginPage() {
           <DemoAccounts onSelect={handleSelectDemo} isDark={isDark} disabled={loading} />
         </div>
       </div>
+
+      {/* Consultation Request Popup Modal */}
+      <ConsultationModal
+        isOpen={isConsultationOpen}
+        onClose={() => setIsConsultationOpen(false)}
+        isDark={isDark}
+      />
     </div>
   );
 }

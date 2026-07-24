@@ -29,6 +29,8 @@ export function getDefaultSize(type: FloorPlanObject['type']) {
       return { width: 16, height: 16 };
     case 'label':
       return { width: 180, height: 40 };
+    case 'image':
+      return { width: 600, height: 400 };
     default:
       return { width: 40, height: 40 };
   }

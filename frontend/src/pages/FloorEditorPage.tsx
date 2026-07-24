@@ -651,13 +651,17 @@ export function FloorEditorPage() {
         if (obj.type === 'connector') return obj;
         return {
           ...obj,
-          x: obj.x + shiftX,
-          y: obj.y + shiftY,
+          x: obj.x - shiftX,
+          y: obj.y - shiftY,
         };
       });
       history.set(updatedObjects);
+      zoomPan.setPosition({
+        x: zoomPan.position.x + shiftX * zoomPan.scale,
+        y: zoomPan.position.y + shiftY * zoomPan.scale,
+      });
     }
-  }, [history]);
+  }, [history, zoomPan]);
 
   const handleStageChange = useCallback((patch: { scale?: number; position?: { x: number; y: number } }) => {
     if (patch.scale !== undefined) zoomPan.setScale(patch.scale);
@@ -676,9 +680,53 @@ export function FloorEditorPage() {
     selection.setSelectedIds(ids);
   }, [selection]);
 
-  const handleAddCustomObject = useCallback((obj: FloorPlanObject) => {
-    history.set([...history.state, obj]);
+  const handleAddCustomObject = useCallback((obj: FloorPlanObject | FloorPlanObject[]) => {
+    const nextObjects = Array.isArray(obj) ? obj : [obj];
+    history.set([...objectsRef.current, ...nextObjects]);
   }, [history]);
+
+  const addImageToCanvas = useCallback((dataUrl: string, imageName?: string) => {
+    const img = new Image();
+    img.onload = () => {
+      let width = img.naturalWidth || 800;
+      let height = img.naturalHeight || 600;
+
+      const maxDim = 1000;
+      if (width > maxDim || height > maxDim) {
+        const ratio = Math.min(maxDim / width, maxDim / height);
+        width = Math.round(width * ratio);
+        height = Math.round(height * ratio);
+      }
+
+      const currentW = canvasWidthRef.current || 1600;
+      const currentH = canvasHeightRef.current || 1000;
+      const centerX = Math.max(50, Math.round((currentW - width) / 2));
+      const centerY = Math.max(50, Math.round((currentH - height) / 2));
+
+      const newImgObj: FloorPlanObject = {
+        id: `image-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        type: 'image',
+        name: imageName ? imageName.replace(/\.[^/.]+$/, '') : 'Hình ảnh sơ đồ',
+        x: centerX,
+        y: centerY,
+        width,
+        height,
+        rotation: 0,
+        src: dataUrl,
+        opacity: 0.5,
+        visible: true,
+        locked: false,
+      };
+
+      history.set([...objectsRef.current, newImgObj]);
+      selection.setSelectedIds([newImgObj.id]);
+      setToast('Đã dán hình ảnh sơ đồ! Tùy chỉnh độ đậm nhạt ở bảng thuộc tính bên phải.');
+    };
+    img.onerror = () => {
+      console.error('Failed to load pasted image source.');
+    };
+    img.src = dataUrl;
+  }, [history, selection]);
 
   const toggleSnap = useCallback(() => {
     editor.setSnapEnabled(!editor.snapEnabled);
@@ -713,6 +761,130 @@ export function FloorEditorPage() {
   const handleClearSelection = useCallback(() => {
     selection.clearSelection();
   }, [selection]);
+
+  // Global Clipboard Paste (Ctrl+V) handler for background blueprint images
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (!editMode) return;
+
+      const clipboardData = e.clipboardData;
+      if (!clipboardData) return;
+
+      let handled = false;
+
+      // 1. Check clipboard files
+      if (clipboardData.files && clipboardData.files.length > 0) {
+        for (let i = 0; i < clipboardData.files.length; i++) {
+          const file = clipboardData.files[i];
+          if (file.type.startsWith('image/')) {
+            e.preventDefault();
+            handled = true;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              const res = event.target?.result as string;
+              if (res) addImageToCanvas(res, file.name);
+            };
+            reader.readAsDataURL(file);
+            break;
+          }
+        }
+      }
+
+      // 2. Check clipboard items
+      if (!handled && clipboardData.items) {
+        for (let i = 0; i < clipboardData.items.length; i++) {
+          const item = clipboardData.items[i];
+          if (item.type.indexOf('image') !== -1 || item.kind === 'file') {
+            const file = item.getAsFile();
+            if (file && file.type.startsWith('image/')) {
+              e.preventDefault();
+              handled = true;
+              const reader = new FileReader();
+              reader.onload = (event) => {
+                const res = event.target?.result as string;
+                if (res) addImageToCanvas(res, file.name);
+              };
+              reader.readAsDataURL(file);
+              break;
+            }
+          }
+        }
+      }
+
+      // 3. Check text containing data:image/ or URL
+      if (!handled) {
+        const text = clipboardData.getData('text/plain');
+        if (text) {
+          const trimmed = text.trim();
+          if (
+            trimmed.startsWith('data:image/') ||
+            /^https?:\/\/.*\.(png|jpg|jpeg|webp|gif|svg)(\?.*)?$/i.test(trimmed)
+          ) {
+            e.preventDefault();
+            handled = true;
+            addImageToCanvas(trimmed, 'Hình ảnh dán');
+          }
+        }
+      }
+    };
+
+    const handleKeyDown = async (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (!editMode) return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+        if (navigator.clipboard && navigator.clipboard.read) {
+          try {
+            const items = await navigator.clipboard.read();
+            for (const item of items) {
+              const imageType = item.types.find((t) => t.startsWith('image/'));
+              if (imageType) {
+                const blob = await item.getType(imageType);
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                  const res = event.target?.result as string;
+                  if (res) addImageToCanvas(res, 'Hình ảnh dán');
+                };
+                reader.readAsDataURL(blob);
+                break;
+              }
+            }
+          } catch (err) {
+            // Ignore error - fallback to paste event
+          }
+        }
+      }
+    };
+
+    window.addEventListener('paste', handlePaste, true);
+    document.addEventListener('paste', handlePaste, true);
+    window.addEventListener('keydown', handleKeyDown, true);
+
+    return () => {
+      window.removeEventListener('paste', handlePaste, true);
+      document.removeEventListener('paste', handlePaste, true);
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [editMode, addImageToCanvas]);
 
   return (
     <div
@@ -859,6 +1031,7 @@ export function FloorEditorPage() {
           floorBelow={floorBelow}
           showBelowBaseline={showBelowBaseline}
           setShowBelowBaseline={setShowBelowBaseline}
+          onAddCustomObject={handleAddCustomObject}
         />
 
         {/* FLOATING SIDEBAR RIGHT: PROPERTIES / INSPECTOR (FIGMA INSPECTOR STYLING) */}

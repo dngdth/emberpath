@@ -24,29 +24,12 @@ export const FloorBaseShape: React.FC<FloorBaseShapeProps> = React.memo(({
 
   return (
     <Group {...commonProps}>
-      <Group
-        clipFunc={(ctx) => {
-          if (pts.length < 4) return;
-          ctx.beginPath();
-          ctx.moveTo(pts[0], pts[1]);
-          for (let i = 2; i < pts.length; i += 2) {
-            ctx.lineTo(pts[i], pts[i + 1]);
-          }
-          ctx.closePath();
-        }}
-      >
-        <Rect
-          x={0}
-          y={0}
-          width={isPolygon ? 4000 : width}
-          height={isPolygon ? 4000 : height}
-          fill={fill}
-        />
-      </Group>
       <Line
         id={isPolygon ? `${object.id}-polygon` : undefined}
         points={pts}
         closed={true}
+        fill={fill}
+        opacity={object.opacity}
         stroke={selected ? '#3b82f6' : isDark ? '#475569' : '#cbd5e1'}
         strokeWidth={selected ? 2.5 : 1.5}
         shadowColor="rgba(0, 0, 0, 0.1)"

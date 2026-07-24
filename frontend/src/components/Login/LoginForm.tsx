@@ -11,6 +11,7 @@ interface LoginFormProps {
   loading: boolean;
   error: string;
   isDark: boolean;
+  onOpenConsultation?: () => void;
 }
 
 export function LoginForm({
@@ -22,6 +23,7 @@ export function LoginForm({
   loading,
   error,
   isDark,
+  onOpenConsultation,
 }: LoginFormProps) {
   const [showPassword, setShowPassword] = useState(false);
 
@@ -43,11 +45,10 @@ export function LoginForm({
             required
             placeholder="nhanvien@toanha.com"
             disabled={loading}
-            className={`w-full rounded-2xl border pl-11 pr-4 py-3 text-base outline-none transition-all duration-200 ${
-              isDark
-                ? 'bg-slate-950/70 border-slate-800 text-white placeholder-slate-600 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10'
-                : 'bg-slate-50 border-slate-200 text-slate-800 placeholder-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10'
-            }`}
+            className={`w-full rounded-2xl border pl-11 pr-4 py-3 text-base outline-none transition-all duration-200 ${isDark
+              ? 'bg-slate-950/70 border-slate-800 text-white placeholder-slate-600 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10'
+              : 'bg-slate-50 border-slate-200 text-slate-800 placeholder-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10'
+              }`}
             style={{ colorScheme: isDark ? 'dark' : 'light' }}
           />
         </div>
@@ -71,20 +72,18 @@ export function LoginForm({
             required
             placeholder="••••••••"
             disabled={loading}
-            className={`w-full rounded-2xl border pl-11 pr-12 py-3 text-base outline-none transition-all duration-200 ${
-              isDark
-                ? 'bg-slate-950/70 border-slate-800 text-white placeholder-slate-600 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10'
-                : 'bg-slate-50 border-slate-200 text-slate-800 placeholder-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10'
-            }`}
+            className={`w-full rounded-2xl border pl-11 pr-12 py-3 text-base outline-none transition-all duration-200 ${isDark
+              ? 'bg-slate-950/70 border-slate-800 text-white placeholder-slate-600 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10'
+              : 'bg-slate-50 border-slate-200 text-slate-800 placeholder-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10'
+              }`}
           />
           <button
             type="button"
             onClick={() => setShowPassword(!showPassword)}
             tabIndex={-1}
             disabled={loading}
-            className={`absolute inset-y-0 right-0 pr-3.5 flex items-center transition-colors hover:text-[#3B82F6] ${
-              isDark ? 'text-slate-500' : 'text-slate-400'
-            }`}
+            className={`absolute inset-y-0 right-0 pr-3.5 flex items-center transition-colors hover:text-[#3B82F6] ${isDark ? 'text-slate-500' : 'text-slate-400'
+              }`}
           >
             {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
           </button>
@@ -122,19 +121,19 @@ export function LoginForm({
       <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3 text-sm">
         <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>
           Chưa có tài khoản?{' '}
-          <Link
-            to="/register"
-            className="font-semibold text-orange-500 hover:text-orange-600 dark:text-orange-400 dark:hover:text-orange-300 transition-colors"
+          <button
+            type="button"
+            onClick={onOpenConsultation}
+            className="font-semibold text-orange-500 hover:text-orange-600 dark:text-orange-400 dark:hover:text-orange-300 transition-colors cursor-pointer"
           >
-            Đăng ký tòa nhà mới
-          </Link>
+            Đăng ký dịch vụ
+          </button>
         </span>
 
         <Link
           to="/"
-          className={`font-medium transition-colors ${
-            isDark ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'
-          }`}
+          className={`font-medium transition-colors ${isDark ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'
+            }`}
         >
           Quay lại trang chủ
         </Link>

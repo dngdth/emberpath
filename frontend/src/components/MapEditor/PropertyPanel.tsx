@@ -464,6 +464,58 @@ export function PropertyPanel({
       </div>
       )}
 
+      {/* 4. OPACITY & TRACING SECTION (Độ đậm nhạt cho hình ảnh / nền tầng) */}
+      {(object.type === 'image' || object.type === 'floor_base' || object.type === 'room' || object.opacity !== undefined) && (
+        <div className={`rounded-2xl border p-3 space-y-2.5 transition-colors duration-300 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+          <div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-blue-500">
+            <div className="flex items-center gap-1.5">
+              <Palette size={12} />
+              <span>Độ đậm nhạt (Opacity)</span>
+            </div>
+            <span className="font-mono text-xs text-blue-400">
+              {Math.round((object.opacity ?? 0.5) * 100)}%
+            </span>
+          </div>
+
+          <div className="space-y-2">
+            <input
+              type="range"
+              min="0.05"
+              max="1"
+              step="0.05"
+              value={object.opacity ?? 0.5}
+              onChange={(e) => onChange({ opacity: parseFloat(e.target.value) })}
+              className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+            />
+
+            {/* Quick Presets */}
+            <div className="grid grid-cols-5 gap-1 pt-1">
+              {[0.2, 0.4, 0.5, 0.7, 1.0].map((val) => (
+                <button
+                  key={val}
+                  type="button"
+                  onClick={() => onChange({ opacity: val })}
+                  className={clsx(
+                    'py-1 rounded-lg text-[10px] font-mono transition border',
+                    (object.opacity ?? 0.5) === val
+                      ? 'border-blue-500 bg-blue-500/20 text-blue-400 font-bold'
+                      : isDark
+                        ? 'border-slate-800 bg-slate-950/40 text-slate-400 hover:bg-slate-800'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
+                  )}
+                >
+                  {Math.round(val * 100)}%
+                </button>
+              ))}
+            </div>
+
+            <p className="text-[9px] opacity-60 mt-1 leading-relaxed">
+              💡 <strong>Mẹo đồ lại sơ đồ:</strong> Giảm độ mờ (20%-50%) và bấm <strong>"Khóa vị trí"</strong> để dễ dàng dùng công cụ Pen/Tường vẽ đè lên hình ảnh tòa nhà.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* 4. VISIBILITY & LOCK SWITCHES */}
       <div className="flex gap-2 pt-1.5">
         <button

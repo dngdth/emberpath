@@ -100,7 +100,17 @@ def _add_plan(db: Session, building_id: int, floor: Floor, objects: list[dict]) 
 
 
 def _seed_gradient_demo(db: Session) -> None:
-    if db.scalar(select(Building).where(Building.code == "GRADIENT-DEMO")):
+    building = db.scalar(select(Building).where(Building.code == "GRADIENT-DEMO"))
+    if building:
+        has_readings = db.scalar(
+            select(SensorReading)
+            .join(SensorDevice)
+            .where(SensorDevice.building_id == building.id)
+            .limit(1)
+        )
+        if not has_readings:
+            from app.seed.seed_history import seed_history
+            seed_history(db)
         return
 
     building = Building(name="Gradient Demo Tower", code="GRADIENT-DEMO")
@@ -217,6 +227,16 @@ def _seed_gradient_demo(db: Session) -> None:
     for floor, objects in zip(floors, all_objects):
         _add_plan(db, building.id, floor, objects)
     db.commit()
+
+    has_readings = db.scalar(
+        select(SensorReading)
+        .join(SensorDevice)
+        .where(SensorDevice.building_id == building.id)
+        .limit(1)
+    )
+    if not has_readings:
+        from app.seed.seed_history import seed_history
+        seed_history(db)
 
 
 def _ensure_super_admin(db: Session) -> None:

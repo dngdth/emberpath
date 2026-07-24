@@ -3,9 +3,10 @@ import { useAuthStore } from '../../store/authStore';
 
 interface HeroSectionProps {
   isDark: boolean;
+  onOpenConsultation: () => void;
 }
 
-export function HeroSection({ isDark }: HeroSectionProps) {
+export function HeroSection({ isDark, onOpenConsultation }: HeroSectionProps) {
   const { token } = useAuthStore();
 
   const handleLearnMore = (e: React.MouseEvent<HTMLAnchorElement>) => {
@@ -18,11 +19,10 @@ export function HeroSection({ isDark }: HeroSectionProps) {
 
   return (
     <section
-      className={`relative pt-32 pb-20 md:pt-40 md:pb-28 overflow-hidden transition-colors duration-300 ${
-        isDark
-          ? 'bg-[#0F172A] text-white'
-          : 'bg-gradient-to-b from-blue-50/50 to-white text-slate-800'
-      }`}
+      className={`relative pt-32 pb-20 md:pt-40 md:pb-28 overflow-hidden transition-colors duration-300 ${isDark
+        ? 'bg-[#0F172A] text-white'
+        : 'bg-gradient-to-b from-blue-50/50 to-white text-slate-800'
+        }`}
     >
       {/* Background decorations */}
       <div className="absolute top-0 left-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -49,9 +49,8 @@ export function HeroSection({ isDark }: HeroSectionProps) {
 
             {/* Subtitle */}
             <p
-              className={`text-lg sm:text-xl leading-relaxed ${
-                isDark ? 'text-slate-300' : 'text-slate-600'
-              }`}
+              className={`text-lg sm:text-xl leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-600'
+                }`}
             >
               Tích hợp IoT, giám sát cảm biến khói thời gian thực và thuật toán định tuyến Dijkstra tự động vẽ sơ đồ thoát hiểm an toàn nhất ngay khi xảy ra sự cố.
             </p>
@@ -59,20 +58,27 @@ export function HeroSection({ isDark }: HeroSectionProps) {
             {/* CTA Buttons */}
             <div className="flex flex-wrap items-center gap-4 pt-2">
               <a
-                href={token ? '/dashboard' : '/register'}
-                className="inline-flex items-center gap-2 rounded-xl bg-[#F97316] hover:bg-orange-600 text-white px-6 py-3.5 text-base font-bold transition-all hover:scale-[1.02] shadow-lg shadow-orange-500/20"
+                href={token ? '/dashboard' : '#'}
+                onClick={(e) => {
+                  if (!token) {
+                    e.preventDefault();
+                    onOpenConsultation();
+                  }
+                }}
+                className={`inline-flex items-center gap-2 rounded-xl bg-[#F97316] hover:bg-orange-600 text-white px-6 py-3.5 text-base font-bold transition-all hover:scale-[1.02] shadow-lg shadow-orange-500/20 ${
+                  !token ? 'animate-float-glow' : ''
+                }`}
               >
-                {token ? 'Vào Bảng Điều Khiển' : 'Bắt đầu ngay'}
+                {token ? 'Vào Bảng Điều Khiển' : 'Đăng ký ngay'}
                 <ArrowRight className="h-5 w-5" />
               </a>
               <a
                 href="#problem-solution"
                 onClick={handleLearnMore}
-                className={`inline-flex items-center gap-2 rounded-xl px-6 py-3.5 text-base font-semibold border transition-all ${
-                  isDark
-                    ? 'border-slate-800 bg-slate-900/60 text-slate-200 hover:bg-slate-800'
-                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                }`}
+                className={`inline-flex items-center gap-2 rounded-xl px-6 py-3.5 text-base font-semibold border transition-all ${isDark
+                  ? 'border-slate-800 bg-slate-900/60 text-slate-200 hover:bg-slate-800'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                  }`}
               >
                 Tìm hiểu thêm
               </a>
@@ -107,10 +113,10 @@ export function HeroSection({ isDark }: HeroSectionProps) {
               <svg viewBox="0 0 800 600" className="w-full h-auto" fill="none" xmlns="http://www.w3.org/2000/svg">
                 {/* Laptop Body & Screen Border */}
                 <rect x="80" y="60" width="640" height="420" rx="20" fill={isDark ? "#1E293B" : "#F1F5F9"} stroke={isDark ? "#475569" : "#CBD5E1"} strokeWidth="12" />
-                
+
                 {/* Laptop Screen Content Area */}
                 <rect x="92" y="72" width="616" height="396" fill={isDark ? "#0F172A" : "#FFFFFF"} />
-                
+
                 {/* Floor Plan Layout */}
                 <g opacity="0.85">
                   {/* Grid Lines */}
@@ -120,10 +126,10 @@ export function HeroSection({ isDark }: HeroSectionProps) {
                     </pattern>
                   </defs>
                   <rect x="92" y="72" width="616" height="396" fill="url(#grid)" />
-                  
+
                   {/* Building Outer Wall */}
                   <rect x="140" y="120" width="520" height="300" rx="10" stroke={isDark ? "#475569" : "#94A3B8"} strokeWidth="4" />
-                  
+
                   {/* Internal Rooms */}
                   {/* Room 1: Office A */}
                   <rect x="140" y="120" width="160" height="150" stroke={isDark ? "#475569" : "#94A3B8"} strokeWidth="3" />
@@ -164,7 +170,7 @@ export function HeroSection({ isDark }: HeroSectionProps) {
                   strokeDasharray="16, 12"
                   className="animate-[dash_1.5s_linear_infinite]"
                 />
-                
+
                 {/* Evacuation Exit Indicator (Green Arrow at exit) */}
                 <g>
                   <circle cx="640" cy="300" r="16" fill="#22C55E" />
@@ -199,12 +205,25 @@ export function HeroSection({ isDark }: HeroSectionProps) {
         </div>
       </div>
 
-      {/* Tailwind global keyframe for stroke-dashoffset animation */}
+      {/* Tailwind global keyframe for animations */}
       <style>{`
         @keyframes dash {
           to {
             stroke-dashoffset: -28;
           }
+        }
+        @keyframes float-glow {
+          0%, 100% {
+            transform: translateY(0);
+            box-shadow: 0 10px 15px -3px rgba(249, 115, 22, 0.3), 0 0 0 0 rgba(249, 115, 22, 0.7);
+          }
+          50% {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 25px -5px rgba(249, 115, 22, 0.1), 0 0 0 12px rgba(249, 115, 22, 0);
+          }
+        }
+        .animate-float-glow {
+          animation: float-glow 2.5s ease-in-out infinite;
         }
       `}</style>
     </section>

@@ -105,8 +105,10 @@ export const adminApi = {
     }>(`/admin/users/${userId}/reset-password`);
     return data;
   },
-  async auditLogs() {
-    const { data } = await api.get<AuditLog[]>('/admin/audit-logs');
+  async auditLogs(limit: number = 50, offset: number = 0) {
+    const { data } = await api.get<AuditLog[]>('/admin/audit-logs', {
+      params: { limit, offset },
+    });
     return data;
   },
 };
@@ -162,6 +164,27 @@ export const sensorsApi = {
   },
   async liveReadings() {
     const { data } = await api.get<SensorReading[]>('/sensors/readings/live');
+    return data;
+  },
+  async historyReadings(filters: {
+    floorId?: number | null;
+    sensorType?: string | null;
+    status?: string | null;
+    deviceId?: string | null;
+    roomName?: string | null;
+    limit?: number;
+    offset?: number;
+  } = {}) {
+    const params = new URLSearchParams();
+    if (filters.floorId) params.set('floor_id', String(filters.floorId));
+    if (filters.sensorType) params.set('sensor_type', filters.sensorType);
+    if (filters.status) params.set('status', filters.status);
+    if (filters.deviceId) params.set('device_id', filters.deviceId);
+    if (filters.roomName) params.set('room_name', filters.roomName);
+    if (filters.limit !== undefined) params.set('limit', String(filters.limit));
+    if (filters.offset !== undefined) params.set('offset', String(filters.offset));
+    
+    const { data } = await api.get<SensorReading[]>(`/sensors/readings/history?${params.toString()}`);
     return data;
   },
 };

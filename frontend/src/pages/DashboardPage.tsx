@@ -4,6 +4,7 @@ import { useAuthStore } from '../store/authStore';
 import { useThemeStore } from '../store/themeStore';
 import { FloorItem, FloorPlanObject, SafePathResult } from '../types/editor';
 import { SensorDevice } from '../types/sensor';
+import { physicalSensorNodeId, sensorDeviceMatchesNode } from '../utils/sensorIdentity';
 
 import { useRealtimeSensors } from '../hooks/useRealtimeSensors';
 import { DashboardSidebar } from '../components/Dashboard/DashboardSidebar';
@@ -107,13 +108,11 @@ export function DashboardPage() {
     const dangerSensorPositions: { x: number; y: number }[] = [];
 
     // Filter sensors in danger state
-    const dangerDeviceIds = new Set(
-      allSensors.filter((s) => s.latest_status === 'danger').map((s) => s.device_id)
-    );
+    const activeDangerSensors = allSensors.filter((s) => s.latest_status === 'danger');
 
     objects.forEach((obj) => {
       if (obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp') {
-        if (dangerDeviceIds.has(obj.id)) {
+        if (activeDangerSensors.some((sensor) => sensorDeviceMatchesNode(sensor.device_id, obj.id))) {
           dangerSensorPositions.push({ x: obj.x, y: obj.y });
         }
       }
@@ -138,9 +137,54 @@ export function DashboardPage() {
     return dangerRoomIds;
   }, [objects, allSensors]);
 
+  const dangerStateKey = useMemo(() => {
+    const physicalNodes = new Set(
+      dangerSensors
+        .filter((sensor) => sensor.floor_id !== null)
+        .map((sensor) => `${sensor.floor_id}:${physicalSensorNodeId(sensor.device_id)}`)
+    );
+    return [...physicalNodes].sort().join('|');
+  }, [dangerSensors]);
+
+  const primaryDangerSensor = useMemo(() => {
+    return (
+      dangerSensors.find((sensor) => sensor.floor_id === selectedFloor)
+      ?? dangerSensors.find((sensor) => sensor.floor_id !== null)
+      ?? null
+    );
+  }, [dangerSensors, selectedFloor]);
+  const primaryDangerFloorId = primaryDangerSensor?.floor_id ?? null;
+  const primaryDangerDeviceId = primaryDangerSensor?.device_id ?? null;
+
+  // A live safe/danger transition immediately activates or recalculates the
+  // building-wide guidance field. Stale requests cannot overwrite a newer route.
+  useEffect(() => {
+    if (!dangerStateKey || primaryDangerFloorId === null || !primaryDangerDeviceId) {
+      setEvacuationActive(false);
+      setSafePath(null);
+      return;
+    }
+
+    let cancelled = false;
+    setEvacuationActive(true);
+
+    floorsApi.findPath(primaryDangerFloorId, primaryDangerDeviceId)
+      .then((path) => {
+        if (!cancelled) setSafePath(path);
+      })
+      .catch(() => {
+        if (!cancelled) setSafePath(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dangerStateKey, primaryDangerFloorId, primaryDangerDeviceId]);
+
   // Handle pathfinding
   async function handleToggleEvacuation() {
     if (evacuationActive) {
+      if (dangerStateKey) return;
       setEvacuationActive(false);
       setSafePath(null);
       return;
@@ -151,13 +195,14 @@ export function DashboardPage() {
     // Determine the node from which the evacuation gradient should be followed.
     let startId = selectedStartRoomId;
     if (!startId) {
-      const dangerDeviceIds = new Set(
-        allSensors.filter((sensor) => sensor.latest_status === 'danger').map((sensor) => sensor.device_id)
-      );
+      const activeDangerSensors = allSensors.filter((sensor) => sensor.latest_status === 'danger');
       const sensorTypes = new Set(['sensor', 'mq2', 'temp']);
       const dangerNode = objects.find((object) =>
         sensorTypes.has(object.type)
-        && (dangerDeviceIds.has(object.id) || object.nodeStatus === 'danger')
+        && (
+          activeDangerSensors.some((sensor) => sensorDeviceMatchesNode(sensor.device_id, object.id))
+          || object.nodeStatus === 'danger'
+        )
       );
       if (dangerNode) {
         startId = dangerNode.id;
@@ -212,7 +257,7 @@ export function DashboardPage() {
   // React to floor plan objects loading when pendingFocusSensorId is set
   useEffect(() => {
     if (objects.length > 0 && pendingFocusSensorId) {
-      const sensorObj = objects.find(o => o.id === pendingFocusSensorId);
+      const sensorObj = objects.find(o => sensorDeviceMatchesNode(pendingFocusSensorId, o.id));
       if (sensorObj) {
         const roomObj = findRoomForSensor(sensorObj, objects);
         if (roomObj) {
@@ -236,7 +281,7 @@ export function DashboardPage() {
       setSelectedFloor(sensor.floor_id);
     } else {
       // already on the current floor, focus immediately
-      const sensorObj = objects.find(o => o.id === sensor.device_id);
+      const sensorObj = objects.find(o => sensorDeviceMatchesNode(sensor.device_id, o.id));
       if (sensorObj) {
         const roomObj = findRoomForSensor(sensorObj, objects);
         if (roomObj) {
@@ -418,6 +463,8 @@ export function DashboardPage() {
                 {/* Evacuation button */}
                 <button
                   onClick={() => void handleToggleEvacuation()}
+                  disabled={evacuationActive && Boolean(dangerStateKey)}
+                  title={evacuationActive && dangerStateKey ? 'Đường thoát hiểm đang được duy trì tự động khi còn nguy hiểm' : undefined}
                   className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase rounded-xl shadow-md transition-all duration-200 ${evacuationActive
                     ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-500/20'
                     : isDark
@@ -426,7 +473,11 @@ export function DashboardPage() {
                     }`}
                 >
                   <Activity size={13} className={evacuationActive ? 'animate-spin' : ''} />
-                  <span>{evacuationActive ? 'Hủy Thoát Hiểm' : 'Kích hoạt đường thoát hiểm'}</span>
+                  <span>
+                    {evacuationActive
+                      ? dangerStateKey ? 'Đang tự động chỉ đường' : 'Hủy Thoát Hiểm'
+                      : 'Kích hoạt đường thoát hiểm'}
+                  </span>
                 </button>
               </div>
             </div>

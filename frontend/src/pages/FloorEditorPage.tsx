@@ -14,6 +14,7 @@ import { useSelection } from '../hooks/useSelection';
 import { useZoomPan } from '../hooks/useZoomPan';
 import { useRealtimeSensors } from '../hooks/useRealtimeSensors';
 import { exportPlanToJson, importPlanFromJson } from '../utils/serialization';
+import { sensorDeviceMatchesNode } from '../utils/sensorIdentity';
 import { FloorItem, FloorPlanObject, SafePathResult } from '../types/editor';
 import {
   Eye,
@@ -379,7 +380,9 @@ export function FloorEditorPage() {
 
     history.state.forEach((obj) => {
       if (obj.type === 'sensor' || obj.type === 'mq2' || obj.type === 'temp') {
-        if (dangerDeviceIds.has(obj.id)) {
+        if (Array.from(dangerDeviceIds).some((deviceId) =>
+          sensorDeviceMatchesNode(deviceId, obj.id)
+        )) {
           dangerPositions.push({ x: obj.x, y: obj.y });
         }
       }
@@ -418,11 +421,17 @@ export function FloorEditorPage() {
   useEffect(() => {
     if (editMode) return; // Automatic pathfinding disabled in Edit Mode
 
-    const dangerNode = history.state.find((object) =>
-      (['sensor', 'mq2', 'temp'].includes(object.type)
-        && (dangerDeviceIds.has(object.id) || object.nodeStatus === 'danger'))
-      || (object.type === 'room' && dangerRooms.has(object.id))
-    );
+    const dangerNode = history.state.find((object) => {
+      if (['sensor', 'mq2', 'temp'].includes(object.type)) {
+        const matchingLiveSensors = allSensors.filter((sensor) =>
+          sensorDeviceMatchesNode(sensor.device_id, object.id)
+        );
+        return matchingLiveSensors.length > 0
+          ? matchingLiveSensors.some((sensor) => sensor.latest_status === 'danger')
+          : object.nodeStatus === 'danger';
+      }
+      return object.type === 'room' && dangerRooms.has(object.id);
+    });
     if (dangerNode && activeFloorId) {
       floorsApi.findPath(activeFloorId, dangerNode.id)
         .then((path) => {
@@ -434,7 +443,7 @@ export function FloorEditorPage() {
     } else {
       setSafePath(null);
     }
-  }, [activeFloorId, editMode, dangerDeviceIds, dangerRooms, history.state]);
+  }, [activeFloorId, editMode, dangerDeviceIds, dangerRooms, history.state, allSensors]);
 
   // Load floors list
   async function loadFloors() {

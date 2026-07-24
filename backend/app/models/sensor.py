@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, String
+from sqlalchemy import DateTime, Float, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -8,12 +8,17 @@ from app.db.base import Base
 
 class SensorDevice(Base):
     __tablename__ = "sensor_devices"
+    __table_args__ = (
+        # device_id là unique trong phạm vi 1 building, nhưng có thể trùng giữa các buildings
+        # (cho phép cùng device_id sync realtime tới nhiều buildings như Gradient Demo)
+        UniqueConstraint("building_id", "device_id", name="uq_building_device_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     building_id: Mapped[int] = mapped_column(ForeignKey("buildings.id"), nullable=False, index=True)
     floor_id: Mapped[int | None] = mapped_column(ForeignKey("floors.id"), nullable=True, index=True)
     room_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    device_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
+    device_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     sensor_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     threshold: Mapped[float] = mapped_column(Float, nullable=False)

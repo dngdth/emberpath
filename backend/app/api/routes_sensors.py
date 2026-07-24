@@ -127,42 +127,41 @@ def get_sensor_history(
 
 @ingest_router.post("/device-readings/ingest")
 async def ingest_device_reading(payload: DeviceIngestRequest, db: Session = Depends(get_db)):
+    # Xác minh building gốc từ ESP32 tồn tại
     building = db.scalar(select(Building).where(Building.code == payload.buildingCode.strip().upper()))
     if not building:
         raise HTTPException(status_code=404, detail="Building not found")
 
-    device = db.scalar(select(SensorDevice).where(SensorDevice.device_id == payload.deviceId, SensorDevice.building_id == building.id))
-    if not device:
+    # Tìm TẤT CẢ devices với device_id này (trên mọi buildings)
+    # → Cho phép Gradient Demo nhận realtime data từ ESP32 của Building A
+    devices = db.scalars(
+        select(SensorDevice).where(SensorDevice.device_id == payload.deviceId)
+    ).all()
+    if not devices:
         raise HTTPException(status_code=404, detail="Sensor device not found")
 
     timestamp = payload.timestamp or datetime.utcnow()
-    status = evaluate_sensor_status(payload.sensorType, payload.value, device.threshold)
 
-    prev_val = device.latest_value
-    prev_status = device.latest_status
+    broadcast_building_ids: set[int] = set()
+    last_status = "safe"
 
-    # Always update live state for realtime monitoring & WebSocket push
-    device.latest_value = payload.value
-    device.latest_status = status
-    device.last_seen_at = timestamp
-
-    # Log to history table only when value changed significantly, status changed, or heartbeat (10 mins)
-    is_significant = False
-    if prev_val is None or prev_status != status:
-        is_significant = True
-    else:
-        delta = abs(payload.value - prev_val)
-        if payload.sensorType == 'temp' and delta >= 1.0:
-            is_significant = True
-        elif payload.sensorType == 'mq2' and delta >= 30.0:
-            is_significant = True
-        elif device.last_seen_at and (timestamp - device.last_seen_at).total_seconds() >= 600:
-            is_significant = True
-
-    if is_significant:
-        db.add(SensorReading(device_id=device.id, value=payload.value, status=status, unit=payload.unit, created_at=timestamp))
+    for device in devices:
+        last_status = evaluate_sensor_status(payload.sensorType, payload.value, device.threshold)
+        device.latest_value = payload.value
+        device.latest_status = last_status
+        device.last_seen_at = timestamp
+        db.add(SensorReading(device_id=device.id, value=payload.value, status=last_status, unit=payload.unit, created_at=timestamp))
+        broadcast_building_ids.add(device.building_id)
 
     db.commit()
 
-    await ws_manager.broadcast_to_building(building.id, {"type": "sensor_tick", "building_id": building.id, "timestamp": timestamp.isoformat()})
-    return {"message": "Reading ingested", "status": status, "logged_to_history": is_significant}
+    # Broadcast tới tất cả buildings đang theo dõi device_id này
+    for bid in broadcast_building_ids:
+        await ws_manager.broadcast_to_building(bid, {
+            "type": "sensor_tick",
+            "building_id": bid,
+            "timestamp": timestamp.isoformat(),
+        })
+
+    return {"message": "Reading ingested", "status": last_status}
+

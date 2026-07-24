@@ -1,5 +1,5 @@
 import React from 'react';
-import { Group, Circle, Rect, Text } from 'react-konva';
+import { Group, Circle, Text } from 'react-konva';
 import { FloorPlanObject } from '../../../types/editor';
 
 interface SensorShapeProps {
@@ -19,71 +19,87 @@ export const SensorShape: React.FC<SensorShapeProps> = React.memo(({
   isDark,
   isDanger,
   isWarning,
-  reading,
   commonProps,
   isHovered,
 }) => {
-  let badgeColor = isDark ? '#1e1b4b' : '#eef2ff';
+  const isMq2  = object.type === 'mq2'  || object.id.toLowerCase().includes('mq2');
+  const isTemp = object.type === 'temp' || object.id.toLowerCase().includes('temp');
+  const icon   = isMq2 ? '💨' : isTemp ? '🌡️' : '📡';
+  const label  = object.name || (isMq2 ? 'MQ2' : isTemp ? 'Temp' : 'Cảm biến');
+
+  // Màu sắc theo trạng thái
+  let badgeColor  = isDark ? '#1e1b4b' : '#eef2ff';
   let strokeColor = isDark ? '#6366f1' : '#818cf8';
 
   if (isDanger) {
-    badgeColor = '#ef4444';
-    strokeColor = '#fca5a5';
+    badgeColor  = 'rgba(127,29,29,0.90)';
+    strokeColor = '#ef4444';
   } else if (isWarning) {
-    badgeColor = '#f59e0b';
-    strokeColor = '#fde68a';
+    badgeColor  = 'rgba(120,53,15,0.90)';
+    strokeColor = '#f59e0b';
   } else if (selected) {
     strokeColor = '#f472b6';
   }
 
-  const isMq2 = object.type === 'mq2' || object.id.toLowerCase().includes('mq2');
-  const isTemp = object.type === 'temp' || object.id.toLowerCase().includes('temp');
-  const icon = isMq2 ? '💨' : isTemp ? '🌡️' : '📡';
-  const label = `${object.name || (isMq2 ? 'MQ2' : isTemp ? 'Temp' : 'Cảm biến')}`;
-  const valueStr = reading ? `${reading.val} ${reading.unit}` : '--';
-
-  const scale = isHovered ? 1.15 : 1;
+  const scale = isHovered ? 1.12 : 1;
 
   return (
     <Group {...commonProps}>
       <Group
-        x={22}
-        y={22}
-        offsetX={22}
-        offsetY={22}
+        x={24}
+        y={24}
+        offsetX={24}
+        offsetY={24}
         scaleX={scale}
         scaleY={scale}
-        shadowColor={isDanger ? '#ef4444' : isWarning ? '#f59e0b' : isDark ? '#38bdf8' : '#3b82f6'}
-        shadowBlur={isHovered ? 15 : 0}
-        shadowOffset={isHovered ? { x: 0, y: 5 } : { x: 0, y: 0 }}
-        shadowOpacity={isHovered ? 0.45 : 0}
+        shadowColor={isDanger ? '#ef4444' : isWarning ? '#f59e0b' : 'transparent'}
+        shadowBlur={isDanger ? 16 : isWarning ? 12 : 0}
+        shadowOpacity={isDanger || isWarning ? 0.7 : 0}
       >
+        {/* Outer pulse ring — chỉ khi danger */}
+        {isDanger && (
+          <Circle
+            name="danger-blink-sensor"
+            radius={30}
+            x={24}
+            y={24}
+            fill="transparent"
+            stroke="#ef4444"
+            strokeWidth={2.5}
+            opacity={0.65}
+          />
+        )}
+
+        {/* Main circle */}
         <Circle
-          name={isDanger ? 'danger-blink-sensor' : isWarning ? 'warning-blink-sensor' : undefined}
           radius={24}
-          x={22}
-          y={22}
+          x={24}
+          y={24}
           fill={badgeColor}
           stroke={strokeColor}
-          strokeWidth={selected || isDanger || isWarning ? 3 : 2}
-          shadowColor={isDanger ? '#ef4444' : isWarning ? '#f59e0b' : selected ? '#f472b6' : strokeColor}
-          shadowBlur={isDanger || isWarning ? 15 : 6}
+          strokeWidth={isDanger || isWarning ? 3 : 2}
+          shadowColor={strokeColor}
+          shadowBlur={isDanger || isWarning ? 14 : 6}
           shadowOpacity={isDark ? 0.6 : 0.3}
         />
-        <Text text={icon} x={11} y={11} fontSize={20} />
+
+        {/* Icon */}
+        <Text text={icon} x={13} y={12} fontSize={20} listening={false} />
+
+        {/* Tên node bên dưới */}
         <Text
           text={label}
-          x={-28}
+          x={-32}
           y={52}
-          width={100}
+          width={112}
           align="center"
-          fontSize={12}
+          fontSize={11}
           fontStyle="bold"
-          fill={object.textColor || (isDark ? '#f8fafc' : '#1e293b')}
+          fill={object.textColor || (isDark ? '#cbd5e1' : '#1e293b')}
           shadowColor={isDark ? '#000' : '#fff'}
           shadowBlur={2}
+          listening={false}
         />
-
       </Group>
     </Group>
   );

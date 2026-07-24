@@ -12,6 +12,71 @@ from app.models.user import User, UserRole
 from app.utils.status import evaluate_sensor_status
 
 
+def _extended_satellite_specs(building_id: int, floor_id: int) -> list[tuple]:
+    return [
+        (building_id, floor_id, f"Satellite {node_id}", f"temp-sat-{node_id}", f"Temp Sat {node_id}", "temp", 50, 26, "C")
+        for node_id in range(4, 7)
+    ] + [
+        (building_id, floor_id, f"Satellite {node_id}", f"mq2-sat-{node_id}", f"MQ2 Sat {node_id}", "mq2", 600, 0, "raw")
+        for node_id in range(4, 7)
+    ]
+
+
+def ensure_extended_satellite_devices(db: Session) -> None:
+    """Add Node 4-6 sensor channels to an existing B01 database once."""
+
+    building = db.scalar(select(Building).where(Building.code == "B01"))
+    if not building:
+        return
+
+    floor = db.scalar(
+        select(Floor)
+        .where(Floor.building_id == building.id)
+        .order_by(Floor.order_index.asc(), Floor.id.asc())
+    )
+    if not floor:
+        return
+
+    existing_device_ids = set(
+        db.scalars(
+            select(SensorDevice.device_id).where(SensorDevice.building_id == building.id)
+        ).all()
+    )
+    now = datetime.utcnow()
+    added = False
+    for building_id, floor_id, room_name, device_id, name, sensor_type, threshold, latest_value, unit in _extended_satellite_specs(building.id, floor.id):
+        if device_id in existing_device_ids:
+            continue
+        status = evaluate_sensor_status(sensor_type, latest_value, threshold)
+        device = SensorDevice(
+            building_id=building_id,
+            floor_id=floor_id,
+            room_name=room_name,
+            device_id=device_id,
+            name=name,
+            sensor_type=sensor_type,
+            threshold=threshold,
+            latest_value=latest_value,
+            latest_status=status,
+            unit=unit,
+            last_seen_at=now,
+        )
+        db.add(device)
+        db.flush()
+        db.add(SensorReading(
+            device_id=device.id,
+            value=latest_value,
+            status=status,
+            unit=unit,
+            created_at=now,
+        ))
+        existing_device_ids.add(device_id)
+        added = True
+
+    if added:
+        db.commit()
+
+
 def make_obj(object_id: str, type_: str, x: float, y: float, **kwargs):
     payload = {
         "id": object_id,
@@ -455,6 +520,7 @@ def seed_database(db: Session) -> None:
         (building_a.id, floor1.id, "Satellite 2", "mq2-sat-2", "MQ2 Sat 2", "mq2", 600, 0, "raw"),
         (building_a.id, floor1.id, "Satellite 3", "temp-sat-3", "Temp Sat 3", "temp", 50, 26, "C"),
         (building_a.id, floor1.id, "Satellite 3", "mq2-sat-3", "MQ2 Sat 3", "mq2", 600, 0, "raw"),
+        *_extended_satellite_specs(building_a.id, floor1.id),
     ]
     now = datetime.utcnow()
     for building_id, floor_id, room_name, device_id, name, sensor_type, threshold, latest_value, unit in device_specs:

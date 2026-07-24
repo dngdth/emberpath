@@ -7,8 +7,12 @@
 #include <esp_wifi.h> // Thư viện bắt buộc để cấu hình ép kênh WiFi
 
 // ==================== CẤU HÌNH ĐỊNH DANH NODE ====================
-// TRƯỚC KHI NẠP CHO MỖI CON: Bình nhớ đổi NODE_ID thành các số khác nhau (1, 2, 3...)
-#define NODE_ID     2   
+// TRƯỚC KHI NẠP CHO MỖI CON: đổi NODE_ID thành ID duy nhất từ 1 đến 6.
+#define NODE_ID     2
+
+#if NODE_ID < 1 || NODE_ID > 6
+#error "NODE_ID phai nam trong khoang 1..6"
+#endif
 
 // ĐIỀN ĐỊA CHỈ MAC CỦA MASTER NODE VÀO ĐÂY (Đã điền đúng MAC Master của bạn)
 uint8_t masterMacAddress[] = {0x30, 0x76, 0xF5, 0x94, 0xCF, 0x14}; 

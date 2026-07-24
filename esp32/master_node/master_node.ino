@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <esp_now.h>
+#include <cstring>
 #include "GradientField.h"
 
 // ==================== CẤU HÌNH LED ====================
@@ -36,9 +37,13 @@ bool buzzerState = false;
 float master_temp = 26.0;
 int master_gas = 0;
 
-float s1_temp = 26.0, s2_temp = 26.0, s3_temp = 26.0;
-int s1_gas = 0, s2_gas = 0, s3_gas = 0;
-bool s1_emergency = false, s2_emergency = false, s3_emergency = false;
+const int MAX_SATELLITE_ID = 6;
+float satelliteTemp[MAX_SATELLITE_ID + 1] = {
+  TEMP_MIN, TEMP_MIN, TEMP_MIN, TEMP_MIN, TEMP_MIN, TEMP_MIN, TEMP_MIN
+};
+int satelliteGas[MAX_SATELLITE_ID + 1] = {};
+bool satelliteEmergency[MAX_SATELLITE_ID + 1] = {};
+bool satelliteSeen[MAX_SATELLITE_ID + 1] = {};
 
 // Cấu trúc nhận ESP-NOW (Phải khớp chính xác với satellite_node)
 typedef struct struct_message {
@@ -59,6 +64,9 @@ void initTopology() {
   router.addNode(1, NODE_NORMAL); // Satellite Node 1
   router.addNode(2, NODE_NORMAL); // Satellite Node 2
   router.addNode(3, NODE_NORMAL); // Satellite Node 3
+
+  // Node 4-6 vẫn được nhận, báo còi và POST lên backend. Chỉ thêm chúng vào
+  // router khi đã khai báo đúng cạnh nối và dải LED vật lý tương ứng.
   
   router.addNode(10, NODE_EXIT);  // Cửa thoát hiểm Exit A
   router.addNode(20, NODE_EXIT);  // Cửa thoát hiểm Exit B
@@ -73,23 +81,24 @@ void initTopology() {
 
 // Callback tự động chạy khi nhận được gói tin ESP-NOW từ các vệ tinh
 void OnDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *incomingDataRaw, int len) {
+  if (len != sizeof(incomingData)) {
+    Serial.print("[ESP-NOW] Bo qua goi sai kich thuoc: ");
+    Serial.println(len);
+    return;
+  }
+
   memcpy(&incomingData, incomingDataRaw, sizeof(incomingData));
 
-  if (incomingData.id == 1) {
-    s1_temp = incomingData.temp;
-    s1_gas = incomingData.gasRaw;
-    s1_emergency = incomingData.emergency;
+  if (incomingData.id < 1 || incomingData.id > MAX_SATELLITE_ID) {
+    Serial.print("[ESP-NOW] Bo qua Node ID khong hop le: ");
+    Serial.println(incomingData.id);
+    return;
   }
-  else if (incomingData.id == 2) {
-    s2_temp = incomingData.temp;
-    s2_gas = incomingData.gasRaw;
-    s2_emergency = incomingData.emergency;
-  }
-  else if (incomingData.id == 3) {
-    s3_temp = incomingData.temp;
-    s3_gas = incomingData.gasRaw;
-    s3_emergency = incomingData.emergency;
-  }
+
+  satelliteTemp[incomingData.id] = incomingData.temp;
+  satelliteGas[incomingData.id] = incomingData.gasRaw;
+  satelliteEmergency[incomingData.id] = incomingData.emergency;
+  satelliteSeen[incomingData.id] = true;
   
   Serial.print("[ESP-NOW] Nhận từ Vệ tinh "); Serial.print(incomingData.id);
   Serial.print(" -> Temp: "); Serial.print(incomingData.temp, 1);
@@ -132,10 +141,17 @@ void postReading(const char* deviceId, const char* sensorType, float value) {
   body += "\"deviceId\":\""     + String(deviceId)      + "\",";
   body += "\"sensorType\":\""   + String(sensorType)    + "\",";
   body += "\"value\":"          + String(value, 2)      + ",";
-  body += "\"unit\":\""         + String(sensorType == "temp" ? "C" : "raw") + "\"";
+  body += "\"unit\":\""         + String(std::strcmp(sensorType, "temp") == 0 ? "C" : "raw") + "\"";
   body += "}";
 
   int httpCode = http.POST(body);
+  Serial.print("[HTTP] ");
+  Serial.print(deviceId);
+  Serial.print(" -> ");
+  Serial.println(httpCode);
+  if (httpCode >= 400) {
+    Serial.println(http.getString());
+  }
   http.end();
 }
 
@@ -232,9 +248,9 @@ void loop() {
 
   // 2. Cập nhật Trạng thái Nút cho thuật toán Gradient Field
   router.setNodeStatus(0, master_emergency ? NODE_DANGER : NODE_NORMAL);
-  router.setNodeStatus(1, s1_emergency     ? NODE_DANGER : NODE_NORMAL);
-  router.setNodeStatus(2, s2_emergency     ? NODE_DANGER : NODE_NORMAL);
-  router.setNodeStatus(3, s3_emergency     ? NODE_DANGER : NODE_NORMAL);
+  router.setNodeStatus(1, satelliteEmergency[1] ? NODE_DANGER : NODE_NORMAL);
+  router.setNodeStatus(2, satelliteEmergency[2] ? NODE_DANGER : NODE_NORMAL);
+  router.setNodeStatus(3, satelliteEmergency[3] ? NODE_DANGER : NODE_NORMAL);
 
   // 3. Thực thi thuật toán Gradient Field C++ trên ESP32
   router.converge();
@@ -243,7 +259,13 @@ void loop() {
   renderGradientFieldLeds();
 
   // 5. Điều khiển còi hú nếu có bất kỳ node nào bị khẩn cấp
-  bool anyEmergency = (master_emergency || s1_emergency || s2_emergency || s3_emergency);
+  bool anyEmergency = master_emergency;
+  for (int nodeId = 1; nodeId <= MAX_SATELLITE_ID; nodeId++) {
+    if (satelliteSeen[nodeId] && satelliteEmergency[nodeId]) {
+      anyEmergency = true;
+      break;
+    }
+  }
   unsigned long currentMillis = millis();
   
   if (anyEmergency) {
@@ -269,12 +291,16 @@ void loop() {
     if (WiFi.status() == WL_CONNECTED) {
       postReading("temp-master", "temp", master_temp);
       postReading("mq2-master",  "mq2",  (float)master_gas);
-      postReading("temp-sat-1",  "temp", s1_temp);
-      postReading("mq2-sat-1",   "mq2",  (float)s1_gas);
-      postReading("temp-sat-2",  "temp", s2_temp);
-      postReading("mq2-sat-2",   "mq2",  (float)s2_gas);
-      postReading("temp-sat-3",  "temp", s3_temp);
-      postReading("mq2-sat-3",   "mq2",  (float)s3_gas);
+      for (int nodeId = 1; nodeId <= MAX_SATELLITE_ID; nodeId++) {
+        if (!satelliteSeen[nodeId]) continue;
+
+        char tempDeviceId[20];
+        char mq2DeviceId[20];
+        snprintf(tempDeviceId, sizeof(tempDeviceId), "temp-sat-%d", nodeId);
+        snprintf(mq2DeviceId, sizeof(mq2DeviceId), "mq2-sat-%d", nodeId);
+        postReading(tempDeviceId, "temp", satelliteTemp[nodeId]);
+        postReading(mq2DeviceId, "mq2", (float)satelliteGas[nodeId]);
+      }
     }
   }
 

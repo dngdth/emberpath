@@ -7,7 +7,10 @@ const REAL_DEVICE_IDS = new Set([
   'temp-master', 'mq2-master',
   'temp-sat-1', 'mq2-sat-1',
   'temp-sat-2', 'mq2-sat-2',
-  'temp-sat-3', 'mq2-sat-3'
+  'temp-sat-3', 'mq2-sat-3',
+  'temp-sat-4', 'mq2-sat-4',
+  'temp-sat-5', 'mq2-sat-5',
+  'temp-sat-6', 'mq2-sat-6'
 ]);
 
 export function useRealtimeSensors(selectedFloor?: number | null, search?: string) {
